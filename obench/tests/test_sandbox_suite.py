@@ -44,6 +44,34 @@ class SandboxSuiteTests(unittest.TestCase):
         self.assertNotIn('host.docker.internal', json.dumps(config))
         self.assertNotIn('extra_allowed_hosts', config['agents'][0])
 
+    def test_context_archive_is_pinned_and_forwarded_without_host_paths_in_manifest(self):
+        from obench.frozen_context import freeze_context
+        root = self.root.resolve()
+        context = root / 'context'
+        (context / 'codex').mkdir(parents=True)
+        (context / 'codex/AGENTS.md').write_text('Run relevant tests.')
+        archive = root / 'context.tar'
+        digest = freeze_context(context, archive)
+        extra = 'context_archive=' + json.dumps(str(archive)) + '\ncontext_sha256="' + digest + '"\n'
+        bare = self.compile()
+        captured = self.compile(extra)
+        self.assertNotEqual(bare.manifest_sha256, captured.manifest_sha256)
+        self.assertEqual(captured.manifest['sandbox']['context_sha256'], digest)
+        self.assertNotIn(str(archive), json.dumps(captured.manifest))
+        env = suite_run.plan_jobs(captured)[0].artifact.as_dict()['environment']['kwargs']
+        self.assertEqual(env['context_archive'], str(archive))
+        self.assertEqual(env['context_sha256'], digest)
+        # A subsequent source mutation cannot silently enter a pinned suite.
+        with archive.open('ab') as f:
+            f.write(b'changed')
+        with self.assertRaises(SuiteError):
+            self.compile(extra)
+
+    def test_context_requires_archive_and_digest(self):
+        for extra in ('context_archive="context.tar"\n', 'context_sha256="' + 'a'*64 + '"\n'):
+            with self.subTest(extra=extra), self.assertRaises(SuiteError):
+                self.compile(extra)
+
     def test_sol_luna_compile_with_explicit_identity_and_distinct_seals(self):
         base = self.base
         seals = set()

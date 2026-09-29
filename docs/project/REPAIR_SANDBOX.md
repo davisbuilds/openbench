@@ -48,6 +48,13 @@ only `environment/app/` into a fresh source volume before execution. Task-author
 Dockerfiles, compose overrides, arbitrary mounts, and network overrides are not
 used by this lane.
 
+Suites may additionally pin a [frozen context archive](FROZEN_CONTEXT.md).
+Reviewed instructions, selected skills and resources are copied into fresh
+container storage before Codex starts; no host directories are mounted. Context
+identity is sealed separately from the task and image, and admission checks
+actual instruction loading. New task packages can use full pre-fix checkout
+archives, preserving project guidance and executable file modes.
+
 ### Developer environment (default for new repairs)
 
 `build_repair_runtime.py` builds developer environment revision 1, tagged

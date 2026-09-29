@@ -104,12 +104,28 @@ async def run(args):
     prefix = '//' if registered else '#'
     command = "set -eu\npython3 -m obench.repair_devtools check > /logs/agent/developer-workflow.json\n"
     command += "test -z \"$(git status --porcelain)\"\ntest \"$(git rev-list --count HEAD)\" = 1\ntest -z \"$(git remote)\"\n"
-    if (app / 'tests').is_dir():
+    if getattr(args, 'project_check', None):
+        command += args.project_check + '\n'
+    elif (app / 'tests').is_dir():
         command += ('pnpm run typecheck\npnpm test\n' if registered
                     else 'python3 -m pytest -q\n')
     command += "printf '\\n" + prefix + " " + MARKER + "\\n' >> " + shlex.quote('/app/' + target) + "\n"
     command += "git diff -- " + shlex.quote(target) + " | rg " + shlex.quote(MARKER) + "\n"
     command += "mkdir /tmp/codex-cleanup-check\nprintf disposable > /tmp/codex-cleanup-check/file\nrm -r /tmp/codex-cleanup-check\ntest ! -e /tmp/codex-cleanup-check\n"
+    captured = None
+    if getattr(args, 'context_archive', None):
+        from obench.frozen_context import load_archive
+        captured = load_archive(args.context_archive, args.context_sha256, kind='context')
+        # Exercise real reads of every staged file through the harness, including
+        # resources and executable helpers, not just discovery metadata.
+        checks = []
+        for name, data in captured.files.items():
+            prefix, relative = name.split('/', 1)
+            dest = ('/tmp/codex-home/' if prefix == 'codex' else '/home/solver/context/resources/') + relative
+            checks.append((dest, hashlib.sha256(data).hexdigest()))
+        program = 'import hashlib,pathlib\n'
+        program += 'for p,h in ' + repr(checks) + ':\n assert hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()==h,p\n'
+        command += 'python3 -c ' + shlex.quote(program) + '\n'
     encoded_command = base64.b64encode(command.encode()).decode()
     oracle = tomllib.loads((args.task / 'task.toml').read_text()).get('metadata', {}).get('openbench_oracle')
     env = None
@@ -123,7 +139,8 @@ async def run(args):
         env = RepairSandbox(environment_dir=(args.task / "environment").resolve(),
             environment_name="offline-codex", session_id="offline-codex-" + uuid.uuid4().hex[:12],
             trial_paths=paths, task_env_config=EnvironmentConfig(network_mode="no-network", cpus=1, memory_mb=1024),
-            network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), runtime_image=image, oracle_id=oracle)
+            network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), runtime_image=image, oracle_id=oracle,
+            **({'context_archive':str(args.context_archive.resolve()),'context_sha256':args.context_sha256} if captured else {}))
 
         async def fake_start(self, actual_model, actual_effort, *_):
             if (actual_model, actual_effort) != (model, effort):
@@ -229,6 +246,35 @@ async def run(args):
             raise RuntimeError("pinned CLI lacks the selected model metadata")
         if len(requests) != 2 or not any(item.get("type") == "custom_tool_call_output" for item in requests[-1]["input"]):
             raise RuntimeError("expected the actual two-request tool loop")
+        sessions = list((output / 'agent/sessions').rglob('*.jsonl'))
+        if len(sessions) != 1:
+            raise RuntimeError('expected one raw Codex session')
+        metas = [event['payload'] for line in sessions[0].read_text().splitlines()
+                 if (event := json.loads(line)).get('type') == 'session_meta']
+        instructions = metas[0].get('base_instructions', {}).get('text') if len(metas) == 1 else None
+        observed = '\n'.join(part['text'] for item in requests[0]['input']
+                             if item.get('type') == 'message' and item.get('role') in ('user', 'developer', 'system')
+                             for part in item.get('content', []) if isinstance(part.get('text'), str))
+        if not isinstance(instructions, str) or not instructions.strip() or instructions.strip() not in observed:
+            raise RuntimeError('native session base instructions differ from the actual provider request')
+        receipt['base_instructions_sha256'] = hashlib.sha256(instructions.encode()).hexdigest()
+        if captured:
+            guidance = captured.files['codex/AGENTS.md'].decode()
+            # Request capture, not an agent's assertion, proves instruction load.
+            if guidance.strip() not in observed:
+                raise RuntimeError('captured global instructions were not loaded by Codex')
+            skills = [n.split('/')[2] for n in captured.files if n.startswith('codex/skills/') and n.endswith('/SKILL.md')]
+            for name in skills:
+                if '/skills/' + name + '/SKILL.md' not in observed and name + '/SKILL.md' not in observed:
+                    raise RuntimeError('captured skill missing from actual catalog: ' + name)
+            project = app / 'AGENTS.md'
+            if project.is_file() and project.read_text().strip() not in observed:
+                raise RuntimeError('project guidance was not loaded by Codex')
+            receipt['context'] = {'sha256':captured.sha256,'file_reads_verified':len(checks),
+                                  'global_loaded':True,'skills_discovered':sorted(skills),
+                                  'project_loaded':project.is_file()}
+            from obench.frozen_context import verify_session_context
+            verify_session_context(output / 'agent/sessions', captured)
         if any(request.get("model") != model or request.get("reasoning", {}).get("effort") != effort for request in requests):
             raise RuntimeError("provider request changed the selected model/effort")
         ledger = [json.loads(line) for line in (output / "gateway.jsonl").read_text().splitlines()]
@@ -259,6 +305,9 @@ def main():
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--task", type=Path, default=REPO / "benchmarks/harbor/local/dojo-evidence-pr60-v3")
     parser.add_argument("--model", choices=sorted(REPAIR_MODEL_PAIRS), default="gpt-5.6-terra-xhigh")
+    parser.add_argument('--context-archive', type=Path)
+    parser.add_argument('--context-sha256')
+    parser.add_argument('--project-check', help='Explicit command for a passing pre-fix public-test subset')
     asyncio.run(run(parser.parse_args()))
 
 

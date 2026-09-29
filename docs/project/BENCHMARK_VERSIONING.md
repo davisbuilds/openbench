@@ -11,13 +11,18 @@ the authority for reproducing a run. Revisions explain what changed.
 | --- | --- |
 | Prompt, buggy source, supplied dependencies, build inputs, or intended repair contract | Advance the case revision. Also advance the oracle if its behavior changes. |
 | Hidden examples, observer queries, acceptance rules, score calculation, or success criteria | Advance the oracle revision. Keep the case revision when the model's problem is unchanged. |
-| Model, reasoning effort, harness/adapter, runtime image, timeout, request budget, concurrency, retries | Change the execution treatment in the suite. Keep case/oracle revisions unless their semantics also change. Renew runtime admission when required. |
+| Model, reasoning effort, harness/adapter, runtime image, captured global context/skills, timeout, request budget, concurrency, retries | Change the execution treatment in the suite. Keep case/oracle revisions unless their semantics also change. Renew runtime admission when required. |
 | README/provenance edits, refactors with verified identical grading behavior, resealing shared implementation dependencies | Keep semantic revisions; refresh the exact seals. Document the reason when it affects interpretation. |
 
 A build/runtime change can affect more than one column: editing the task's
 Dockerfile changes its case inputs, while selecting a different solver runtime
 image changes the execution treatment. Neither can silently reuse the previous
 suite identity.
+
+Replacing a reconstructed source slice with a full historical checkout advances
+the case revision, including its project instructions and ordinary tests. The
+separate [frozen context bundle](FROZEN_CONTEXT.md) is an execution treatment;
+changing global guidance alone does not revise the case or oracle.
 
 ## Task declaration
 

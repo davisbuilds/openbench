@@ -87,6 +87,8 @@ class RepairSandboxPolicy:
     kind: str
     runtime_image: str
     max_requests: int = 200
+    context_archive: Path | None = None
+    context_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -171,15 +173,15 @@ def load_suite(
         run=run,
         evidence=evidence,
         publication=publication,
-        sandbox=_parse_sandbox(raw.get("sandbox")),
+        sandbox=_parse_sandbox(raw.get("sandbox"), root),
     )
 
 
-def _parse_sandbox(value: Any) -> RepairSandboxPolicy | None:
+def _parse_sandbox(value: Any, root: Path | None = None) -> RepairSandboxPolicy | None:
     if value is None:
         return None
     table = _expect_table(value, "sandbox")
-    _expect_keys(table, {"kind", "runtime_image", "max_requests"}, "sandbox",
+    _expect_keys(table, {"kind", "runtime_image", "max_requests", "context_archive", "context_sha256"}, "sandbox",
                  required={"kind", "runtime_image"})
     if table["kind"] != "repair-v1":
         raise SuiteError("sandbox.kind must be repair-v1")
@@ -189,7 +191,18 @@ def _parse_sandbox(value: Any) -> RepairSandboxPolicy | None:
     limit = _integer(table.get("max_requests", 200), "sandbox.max_requests", minimum=1)
     if limit > 1000:
         raise SuiteError("sandbox.max_requests must not exceed 1000")
-    return RepairSandboxPolicy("repair-v1", image, limit)
+    archive, digest = table.get('context_archive'), table.get('context_sha256')
+    if (archive is None) != (digest is None):
+        raise SuiteError('context_archive and context_sha256 must be supplied together')
+    if archive is not None:
+        from .frozen_context import load_archive
+        archive = Path(_string(archive, 'sandbox.context_archive'))
+        archive = Path(os.path.abspath((root or Path.cwd()) / archive))
+        try:
+            load_archive(archive, digest, kind='context')
+        except (ValueError, OSError) as exc:
+            raise SuiteError('invalid pinned context archive: ' + str(exc)) from exc
+    return RepairSandboxPolicy("repair-v1", image, limit, archive, digest)
 
 
 def _project_root(
