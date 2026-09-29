@@ -121,15 +121,26 @@ class FrozenContextTests(unittest.TestCase):
         def message(role, text):
             return {'type': 'response_item', 'payload': {'type': 'message', 'role': role,
                     'content': [{'type': 'input_text', 'text': text}]}}
-        evidence = 'Run relevant tests.\n/tmp/codex-home/skills/example/SKILL.md'
-        session.write_text(json.dumps(message('user', evidence)) + '\n')
+        evidence = '# AGENTS.md instructions for /app\nRun relevant tests.\n/tmp/codex-home/skills/example/SKILL.md'
+        catalog = '<skills_instructions>\n## Skills\n### Skill roots\n- `r0` = `/tmp/codex-home/skills`\n### Available skills\n- example: Example workflow. (file: r0/example/SKILL.md)\n</skills_instructions>'
+        def write(*messages):
+            session.write_text(''.join(json.dumps(m)+'\n' for m in messages))
+        write(message('developer', catalog), message('user', evidence))
         self.assertEqual(verify_session_context(sessions, loaded)['skills_discovered'], ['example'])
-        session.write_text(json.dumps(message('assistant', evidence)) + '\n')
+        write(message('assistant', evidence))
         with self.assertRaisesRegex(ValueError, 'global guidance'):
             verify_session_context(sessions, loaded)
-        session.write_text(json.dumps(message('user', 'Run relevant tests.')) + '\n')
-        with self.assertRaisesRegex(ValueError, 'skills'):
-            verify_session_context(sessions, loaded)
+        # A quoted path or even a quoted catalog in user guidance is not the
+        # harness-generated catalog. Wrong roots and later echoes also fail.
+        for messages in (
+            [message('user', evidence)],
+            [message('user', evidence + '\n' + catalog)],
+            [message('developer', catalog.replace('/tmp/codex-home/skills', '/other/skills')), message('user', evidence)],
+            [message('user', evidence), message('assistant', 'done'), message('developer', catalog)],
+        ):
+            write(*messages)
+            with self.subTest(messages=messages), self.assertRaisesRegex(ValueError, 'skills'):
+                verify_session_context(sessions, loaded)
 
 
 if __name__ == '__main__':

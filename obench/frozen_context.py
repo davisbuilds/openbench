@@ -208,27 +208,54 @@ def materialize(archive, destination):
         os.rename(staged, destination)
 
 
-def verify_session_context(sessions, archive):
-    """Verify actual instruction messages, never assistant claims or tool output."""
-    paths = list(Path(sessions).rglob('*.jsonl'))
-    if len(paths) != 1:
-        raise ValueError('context verification requires one raw Codex session')
-    messages = []
-    for line in paths[0].read_text().splitlines():
-        event = json.loads(line)
-        payload = event.get('payload', {})
-        if (event.get('type') == 'response_item' and payload.get('type') == 'message'
-                and payload.get('role') in ('user', 'developer', 'system')):
-            messages.extend(item['text'] for item in payload.get('content', [])
-                            if isinstance(item, dict) and isinstance(item.get('text'), str))
-    observed = '\n'.join(messages)
-    if archive.files['codex/AGENTS.md'].decode().strip() not in observed:
+def verify_instruction_context(messages, archive):
+    """Check initial AGENTS injection and the pinned CLI's generated catalog.
+
+    Paths quoted in user instructions, tool output or later echoes are not
+    discovery evidence. Catalog roots must resolve to the staged skills.
+    """
+    guidance, catalogs = [], []
+    for message in messages:
+        if message.get('role') == 'assistant' or message.get('type') in ('function_call', 'custom_tool_call'):
+            break
+        if message.get('type') != 'message':
+            continue
+        for item in message.get('content', []):
+            text = item.get('text') if isinstance(item, dict) else None
+            if not isinstance(text, str):
+                continue
+            if message.get('role') == 'user' and text.startswith('# AGENTS.md instructions'):
+                guidance.append(text)
+            if (message.get('role') == 'developer' and text.startswith('<skills_instructions>\n')
+                    and text.rstrip().endswith('</skills_instructions>')):
+                catalogs.append(text)
+    if archive.files['codex/AGENTS.md'].decode().strip() not in '\n'.join(guidance):
         raise ValueError('captured global guidance missing from actual session')
     skills = sorted(n.split('/')[2] for n in archive.files
                     if n.startswith('codex/skills/') and n.endswith('/SKILL.md'))
-    if any(name + '/SKILL.md' not in observed for name in skills):
+    discovered = set()
+    for catalog in catalogs:
+        roots = dict(re.findall(r'^- `(r\d+)` = `([^`]+)`$', catalog, re.M))
+        _, separator, entries = catalog.partition('### Available skills\n')
+        if not separator:
+            continue
+        for path in re.findall(r'^- .+ \(file: ([^)\n]+)\)$', entries, re.M):
+            alias, _, relative = path.partition('/')
+            resolved = roots[alias] + '/' + relative if alias in roots else path
+            discovered.add(resolved)
+    if any('/tmp/codex-home/skills/' + name + '/SKILL.md' not in discovered for name in skills):
         raise ValueError('captured skills missing from actual session catalog')
     return {'sha256': archive.sha256, 'global_loaded': True, 'skills_discovered': skills}
+
+
+def verify_session_context(sessions, archive):
+    """Use original instruction messages from one raw session, not agent claims."""
+    paths = list(Path(sessions).rglob('*.jsonl'))
+    if len(paths) != 1:
+        raise ValueError('context verification requires one raw Codex session')
+    events = [json.loads(line) for line in paths[0].read_text().splitlines()]
+    return verify_instruction_context([event.get('payload', {}) for event in events
+                                       if event.get('type') == 'response_item'], archive)
 
 
 def main(argv=None):

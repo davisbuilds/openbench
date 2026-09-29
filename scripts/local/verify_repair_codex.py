@@ -259,21 +259,14 @@ async def run(args):
             raise RuntimeError('native session base instructions differ from the actual provider request')
         receipt['base_instructions_sha256'] = hashlib.sha256(instructions.encode()).hexdigest()
         if captured:
-            guidance = captured.files['codex/AGENTS.md'].decode()
+            from obench.frozen_context import verify_instruction_context, verify_session_context
             # Request capture, not an agent's assertion, proves instruction load.
-            if guidance.strip() not in observed:
-                raise RuntimeError('captured global instructions were not loaded by Codex')
-            skills = [n.split('/')[2] for n in captured.files if n.startswith('codex/skills/') and n.endswith('/SKILL.md')]
-            for name in skills:
-                if '/skills/' + name + '/SKILL.md' not in observed and name + '/SKILL.md' not in observed:
-                    raise RuntimeError('captured skill missing from actual catalog: ' + name)
+            context_evidence = verify_instruction_context(requests[0]['input'], captured)
             project = app / 'AGENTS.md'
             if project.is_file() and project.read_text().strip() not in observed:
                 raise RuntimeError('project guidance was not loaded by Codex')
-            receipt['context'] = {'sha256':captured.sha256,'file_reads_verified':len(checks),
-                                  'global_loaded':True,'skills_discovered':sorted(skills),
+            receipt['context'] = {**context_evidence,'file_reads_verified':len(checks),
                                   'project_loaded':project.is_file()}
-            from obench.frozen_context import verify_session_context
             verify_session_context(output / 'agent/sessions', captured)
         if any(request.get("model") != model or request.get("reasoning", {}).get("effort") != effort for request in requests):
             raise RuntimeError("provider request changed the selected model/effort")
