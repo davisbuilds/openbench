@@ -111,6 +111,18 @@ the PR, not as a "resolved" note here).
   HOME helper-alias warning through admission controls before treating it as a
   missing capability. Keep host/history/oracle isolation intact.
 
+#### Full-checkout contract admission
+- **What**: check compatibility among task instructions, historical public tests,
+  and the oracle's caller interface before treating misses as model difficulty.
+- **Evidence**: replacing a reconstructed slice with a full checkout can remove
+  API scaffolding and introduce legacy record formats. Passing environment
+  controls and hidden reference repairs alone does not expose that mismatch.
+- **Next**: use the [public contract supplement](../../benchmarks/fixtures/dojo-session-contract/CONTRACT.md)
+  for new Dojo packages; require a reference that passes both those examples and
+  the unchanged hidden grader. Keep historical scores intact and label affected
+  cases as unsuitable for difficulty calibration until corrected trials exist.
+  Incorporate this check into future full-checkout packaging admission.
+
 #### Share case snapshots across oracle revisions
 - **What**: independent [case/oracle revisions](BENCHMARK_VERSIONING.md) now
   describe identity, but Harbor task directories still duplicate a case's

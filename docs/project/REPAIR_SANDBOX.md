@@ -57,8 +57,8 @@ archives, preserving project guidance and executable file modes.
 
 ### Developer environment (default for new repairs)
 
-`build_repair_runtime.py` builds developer environment revision 1, tagged
-`dev-v1-codex-0.157.0` for convenience. Suites must use its immutable image ID.
+`build_repair_runtime.py` builds developer environment revision 2, tagged
+`dev-v2-codex-0.157.0` for convenience. Suites must use its immutable image ID.
 The build receipt records the context hashes, effective tool versions and passing
 nonroot, read-only-root, offline developer workflow checks. An image digest is
 the exact treatment identity; the label is a human-readable feature revision.
@@ -66,7 +66,10 @@ the exact treatment identity; the label is a human-readable feature revision.
 - Shared tools: Git, ripgrep, Bash, jq, Python/pytest, Node, npm/npx, pnpm,
   make, GCC/G++, curl and process inspection.
 - Backend profile: locked npm dependencies including TypeScript 6.0.3,
-  tsx 4.23.5, SQLite and relevant type declarations. Python supplies pinned
+  tsx 4.23.5, SQLite and relevant type declarations. Revision 2 adds ESLint
+  10.8.0, `@eslint/js` 10.0.1 and typescript-eslint 8.65.0. Admission exercises
+  both `pnpm exec eslint` and `npx --no-install eslint` with an ESM TypeScript
+  config, including an unused-variable negative control. Python supplies pinned
   PyYAML and pytest. Packages are preinstalled; no runtime install or registry
   access is needed. npm defaults offline and pip disables index lookup.
 - Every workspace gets one synthetic Git baseline, no remotes or original

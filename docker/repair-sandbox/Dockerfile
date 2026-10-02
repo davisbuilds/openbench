@@ -28,11 +28,12 @@ COPY --from=node /opt/repair-deps /opt/repair-deps
 RUN ln -s /opt/repair-deps/node_modules /node_modules \
     && ln -s /opt/repair-deps/node_modules/typescript/bin/tsc /usr/local/bin/tsc \
     && ln -s /opt/repair-deps/node_modules/tsx/dist/cli.mjs /usr/local/bin/tsx \
+    && ln -s /opt/repair-deps/node_modules/eslint/bin/eslint.js /usr/local/bin/eslint \
     && node -e "const DB=require('/node_modules/better-sqlite3'); const db=new DB(':memory:'); db.prepare('SELECT 1').get(); db.close()"
 COPY obench/ /opt/openbench/obench/
 ENV PYTHONPATH=/opt/openbench PYTHONDONTWRITEBYTECODE=1 HOME=/home/solver \
     PATH=/opt/repair-deps/node_modules/.bin:$PATH \
     npm_config_cache=/tmp/npm-cache npm_config_offline=true \
     PIP_NO_INDEX=1 PNPM_HOME=/tmp/pnpm XDG_CACHE_HOME=/tmp/cache
-LABEL org.openbench.developer-environment="1"
+LABEL org.openbench.developer-environment="2"
 WORKDIR /app
