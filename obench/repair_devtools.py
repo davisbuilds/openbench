@@ -52,6 +52,7 @@ def check():
         'node': ('node', '--version'), 'npm': ('npm', '--version'),
         'npx': ('npx', '--version'), 'pnpm': ('pnpm', '--version'),
         'typescript': ('tsc', '--version'), 'tsx': ('tsx', '--version'),
+        'eslint': ('eslint', '--version'),
         'make': ('make', '--version'), 'gcc': ('gcc', '--version'),
         'g++': ('g++', '--version'), 'curl': ('curl', '--version'),
     }
@@ -76,6 +77,21 @@ def check():
         run('pnpm', 'exec', 'tsc', '--ignoreConfig', '--noEmit', '--skipLibCheck', 'example.ts', cwd=app)
         run('pnpm', 'exec', 'tsx', 'example.ts', cwd=app)
         run('npx', '--no-install', 'tsc', '--version', cwd=app)
+        # Prove the project's lint entry points work offline, including ESM
+        # config imports and TypeScript parsing. A binary version alone misses
+        # missing config/parser packages and npx's attempted registry fallback.
+        (app / 'eslint.config.mjs').write_text(
+            'import eslint from "@eslint/js";\n'
+            'import tseslint from "typescript-eslint";\n'
+            'export default [eslint.configs.recommended, ...tseslint.configs.recommended];\n')
+        (app / 'lint.ts').write_text('export const value: number = 2;\n')
+        run('pnpm', 'exec', 'eslint', 'lint.ts', cwd=app)
+        run('npx', '--no-install', 'eslint', 'lint.ts', cwd=app)
+        (app / 'lint.ts').write_text('const unused: number = 2;\n')
+        rejected = subprocess.run(['pnpm', 'exec', 'eslint', 'lint.ts'], cwd=app,
+                                  text=True, capture_output=True, timeout=60)
+        if rejected.returncode != 1 or 'no-unused-vars' not in rejected.stdout:
+            raise RuntimeError('lint negative control did not detect unused TypeScript')
         (app / 'probe.c').write_text('int main(void) { return 0; }\n')
         (app / 'Makefile').write_text('all:\n\t$(CC) probe.c -o probe\n')
         run('make', cwd=app)
@@ -88,7 +104,7 @@ def check():
         run('rm', '-r', str(scratch))
         assert not scratch.exists()
     return {'schema': 1, 'versions': versions, 'workflows': ['git-baseline-diff', 'search',
-            'python-tests', 'typescript-check-run', 'native-build', 'json', 'processes', 'cleanup']}
+            'python-tests', 'typescript-check-run', 'typescript-lint', 'native-build', 'json', 'processes', 'cleanup']}
 
 
 def main():

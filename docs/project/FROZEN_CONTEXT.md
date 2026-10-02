@@ -117,6 +117,20 @@ post-fix tests, solutions or documentation into the candidate checkout.
 Materialize this archive into a new self-contained Harbor task, select the
 existing oracle, advance the case revision, and reseal the task. Document any
 added `DEVELOPMENT.md`, command adaptations and actual provisioned dependencies.
+Reconcile the oracle's caller interface with the exact historical source before
+reusing it: a reconstructed slice may already contain API additions that the
+historical checkout lacks. State any required interface extensions in the new
+case's instruction and expose synthetic public compatibility examples. This is
+an explicit case revision, not a reason to copy post-fix repository tests or
+source into the original archive. The [Dojo contract supplement](../../benchmarks/fixtures/dojo-session-contract/CONTRACT.md)
+illustrates native developer messages, historical fixture formats and the
+mode-aware budget interface. Keep private full checkouts outside tracked paths.
+If an untouched historical test fails because of a container timing assumption,
+reproduce it outside the repair sandbox before adapting it. Preserve the original
+archive; record the exact test-only change and before/after hashes in the new
+case's provenance. Keep assertions intact and verify the adapted test through the
+actual harness. A longer test shutdown guard is separate from the model's trial
+deadline and must not silently extend that deadline.
 The runtime preserves executable files and initializes one fresh synthetic Git
 commit without remotes. Reusing an archive across oracle revisions does not
 require another source export.
