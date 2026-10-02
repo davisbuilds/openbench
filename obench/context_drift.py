@@ -13,6 +13,10 @@ from .frozen_context import MAX_BYTES, MAX_FILES, _regular
 IGNORED = frozenset(('.git', '__pycache__', '.DS_Store'))
 
 
+def _skill_file(name):
+    return name.startswith('codex/skills/') and not IGNORED.intersection(name.split('/')[3:])
+
+
 def _tree(path):
     # Installed skills commonly link to a canonical global directory. Resolve
     # only the explicitly selected skill root; reject links inside its tree.
@@ -42,7 +46,7 @@ def _tree(path):
 
 def _baseline(archive, provenance):
     files = {n: {'sha256': info['sha256'], 'mode': info['mode']}
-             for n, info in archive.manifest['files'].items() if n.startswith('codex/skills/')}
+             for n, info in archive.manifest['files'].items() if _skill_file(n)}
     skills = sorted(n.split('/')[2] for n in files if len(n.split('/')) == 4 and n.endswith('/SKILL.md'))
     if not skills or any(n.split('/')[2] not in skills for n in files):
         raise ValueError('archive must contain complete selected skills with SKILL.md')
@@ -55,7 +59,7 @@ def _baseline(archive, provenance):
             if not isinstance(item, dict) or not isinstance(item.get('destination'), str):
                 raise ValueError('invalid provenance file record')
             name = item['destination']
-            if not name.startswith('codex/skills/'):
+            if not _skill_file(name):
                 continue
             if name in seen or name not in files:
                 raise ValueError('duplicate or unexpected skill provenance')

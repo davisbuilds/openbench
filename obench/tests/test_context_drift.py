@@ -114,6 +114,19 @@ class ContextDriftTests(unittest.TestCase):
         (self.canonical / 'example/__pycache__/generated.pyc').write_bytes(b'cache')
         self.assertEqual(self.audit()['status'], 'clean')
 
+    def test_historical_archive_cache_files_are_ignored_on_both_sides(self):
+        for relative in ('__pycache__/generated.pyc', '.DS_Store'):
+            target = self.capture / 'codex/skills/example' / relative
+            target.parent.mkdir(exist_ok=True)
+            target.write_bytes(b'historical cache')
+            current = self.canonical / 'example' / relative
+            current.parent.mkdir(exist_ok=True)
+            current.write_bytes(b'different disposable content')
+        archive = self.root / 'with-cache.tar'
+        self.loaded = load_archive(archive, freeze_context(self.capture, archive), kind='context')
+        self.assertEqual(self.audit()['status'], 'clean')
+        self.assertEqual(self.audit(self.provenance())['status'], 'clean')
+
     def test_duplicate_labels_cannot_silently_drop_a_source(self):
         with self.assertRaises(ValueError):
             parse_roots(['global=/first', 'global=/second'])
