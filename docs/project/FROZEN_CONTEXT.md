@@ -47,6 +47,49 @@ collisions and supplied `.git` history are rejected. Context excludes harness
 configuration, authentication and session directories. Use physical paths without
 symlink ancestors, including for temporary directories on macOS.
 
+## Check skill freshness before a new treatment
+
+Archive verification proves that frozen bytes have not changed. It does not
+compare them with current source skills. Run the read-only audit on the machine
+that owns the canonical and installed copies before preparing or qualifying a
+new context treatment:
+
+```bash
+python -m obench.frozen_context audit-skills results/context-v1.tar \
+  --sha256 <archive-sha256> \
+  --skills-root dojo=/path/to/dojo/skills \
+  --skills-root codex="$HOME/.codex/skills" \
+  > results/context-skill-drift.json
+```
+
+Repeat `--skills-root LABEL=PATH` for other installed harnesses. The audit reads
+only skill names selected by the archive and compares their full trees: added,
+removed and changed files, plus normalized executable modes. Installed skill-root
+symlinks are supported; nested links and unreadable/special inputs produce an
+incomplete result. `.git`, `__pycache__` and `.DS_Store` are excluded, matching
+capture hygiene. Empty skill catalogs cannot report clean.
+
+JSON goes to stdout; drift/incomplete warnings go to stderr. Exit codes are
+**0** clean, **1** drift, **2** incomplete audit or invalid input. A missing root
+is not a clean result. Global AGENTS guidance, resources outside skill trees,
+and unselected skills are outside this command's scope. This is an explicit
+operator check, not a background watcher or an implicit campaign launch gate.
+
+For intentional container adaptations, add `--provenance results/capture.json`.
+The private JSON sidecar has a `files` list. Each selected skill file needs
+`destination` (its archive path), `original_sha256` and `staged_sha256`.
+The staged hash must match the verified archive. Optional `original_mode` is
+`420` (0644) or `493` (0755); omission means the archive's mode. Other capture
+fields and non-skill records may coexist. The audit compares current source
+files with those original hashes and reports known adaptations separately. It
+never follows source locators from the sidecar. Preserve contemporaneous capture
+records; do not declare later drift to be an adaptation by inventing a baseline.
+
+Keep reports and source provenance private. The audit never synchronizes skills
+or rewrites archives. On drift, either explicitly retain the historical treatment
+for a matched comparison or review and freeze a new bundle, then renew admission.
+Source edits after an audit do not enter an already frozen trial.
+
 ## Select the execution treatment
 
 Add both fields to the existing suite sandbox configuration:

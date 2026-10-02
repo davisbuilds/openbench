@@ -275,9 +275,28 @@ def main(argv=None):
     unpack.add_argument('archive', type=Path); unpack.add_argument('--sha256', required=True)
     unpack.add_argument('--kind', choices=('context', 'checkout'), required=True)
     unpack.add_argument('--destination', type=Path, required=True)
+    audit = sub.add_parser('audit-skills', help='report frozen skill drift against explicit current source roots')
+    audit.add_argument('archive', type=Path)
+    audit.add_argument('--sha256', required=True)
+    audit.add_argument('--skills-root', action='append', required=True, metavar='LABEL=PATH',
+                       help='directory containing current skill trees; repeat for canonical and installed roots')
+    audit.add_argument('--provenance', type=Path,
+                       help='private capture records with original/staged hashes for intentional adaptations')
     args = parser.parse_args(argv)
     try:
-        if args.command == 'context':
+        if args.command == 'audit-skills':
+            import sys
+            from .context_drift import audit_skills, parse_roots
+            roots = parse_roots(args.skills_root)
+            loaded = load_archive(args.archive, args.sha256, kind='context')
+            provenance = json.loads(_regular(args.provenance)[0], object_pairs_hook=_unique) if args.provenance else None
+            report = audit_skills(loaded, roots, provenance)
+            print(json.dumps(report, sort_keys=True))
+            if report['status'] != 'clean':
+                print('WARNING: frozen skill audit is ' + report['status'] +
+                      '; inspect per-source changes before selecting the next treatment. Archive unchanged.', file=sys.stderr)
+            return {'clean': 0, 'drift': 1, 'incomplete': 2}[report['status']]
+        elif args.command == 'context':
             digest = freeze_context(args.source, args.output)
         elif args.command == 'checkout':
             exclusions = json.loads(args.exclusions.read_text(), object_pairs_hook=_unique) if args.exclusions else {}
