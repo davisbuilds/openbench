@@ -97,6 +97,13 @@ is present on a fetched remote branch. Run these commands on the execution host.
 It uses tmux and, on macOS, `caffeinate -i`; it does not prevent lid sleep or
 survive reboot. Use an interpreter with the pinned Harbor environment available.
 
+For a new frozen-context treatment, first run the
+[skill freshness audit](project/FROZEN_CONTEXT.md#check-skill-freshness-before-a-new-treatment)
+on the source-owning machine against both canonical and installed skill roots.
+Save its private report alongside capture provenance. Resolve drift by explicitly
+retaining the historical treatment or freezing a reviewed replacement; a clean
+archive digest alone does not establish source freshness.
+
 ```sh
 obench campaign qualify path/to/suite.toml \
   --harbor-binary /path/to/harbor --auth-file /path/to/local/auth.json
