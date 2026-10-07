@@ -195,8 +195,10 @@ longer require another workflow run. Old receipts carrying only
 new contract.
 
 Runtime qualification fingerprints follow local imports from execution entry
-points and qualification scripts, including package initializers and literal
-registry/subprocess module names. All adapter and oracle modules remain included
+points and qualification scripts, including the umbrella CLI, package initializers and literal
+registry/subprocess module names. The entire CLI is bound; only its literal
+non-repair dispatch branches are excluded from dependency traversal. New or
+unrecognized routing conditions are traversed conservatively. All adapter and oracle modules remain included
 because these also load dynamically. Runtime images, dependencies, control task
 bytes, context and model/effort identities retain their existing bindings.
 Standalone report/query edits no longer require expensive runtime qualification;

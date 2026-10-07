@@ -10,9 +10,32 @@ import ast
 from pathlib import Path
 import re
 
-RUNTIME_ROOTS = ('obench.runtime_admission', 'obench.suite_run',
+RUNTIME_ROOTS = ('obench.__main__', 'obench.cli', 'obench.runtime_admission', 'obench.suite_run',
                  'obench.harbor_agents.sandbox_codex', 'obench.sandbox_gateway')
 DYNAMIC_FAMILIES = ('obench.adapters', 'obench.harbor_agents', 'obench.repair_oracles')
+
+
+def dependency_nodes(tree, *, cli=False):
+    """Prune only literal CLI dispatches that cannot handle a repair run.
+
+    The entire CLI source is still hashed. New/unrecognized conditions and
+    unconditional imports are traversed conservatively, so changes cannot add
+    an ordinary dependency without binding it.
+    """
+    yield tree
+    if cli and isinstance(tree, ast.If):
+        test = tree.test
+        if (isinstance(test, ast.Compare) and isinstance(test.left, ast.Name)
+                and test.left.id == 'command' and len(test.ops) == 1
+                and isinstance(test.ops[0], ast.Eq) and len(test.comparators) == 1
+                and isinstance(test.comparators[0], ast.Constant)
+                and isinstance(test.comparators[0].value, str)
+                and test.comparators[0].value not in ('run', 'campaign', 'repair')):
+            for node in [test, *tree.orelse]:
+                yield from dependency_nodes(node, cli=cli)
+            return
+    for child in ast.iter_child_nodes(tree):
+        yield from dependency_nodes(child, cli=cli)
 
 
 def runtime_sources(root, scripts):
@@ -38,7 +61,8 @@ def runtime_sources(root, scripts):
                 prefix = '.'.join(parts[:count])
                 if prefix in modules:
                     result.add(prefix)
-        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in dependency_nodes(tree, cli=path == root/'obench/cli.py'):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     include(alias.name)

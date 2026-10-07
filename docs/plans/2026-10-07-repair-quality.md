@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 ---
 
 # Repair validation before further model campaigns
@@ -107,4 +107,5 @@ Local Dojo synthetic admission replay took about 2.3 seconds for seven controls
 on the pinned runtime. This is a small fixture measurement, not a performance
 claim for full tasks or the Mini; it does not justify caching authoritative
 replays. Evidence is under ignored `results/repair-second-pass-20261007/`.
-Finish PR review/CI delivery, then stop this pass. No model benchmarking has run.
+Implementation is complete; PR review/CI delivery remains the merge gate.
+Then stop this pass. No model benchmarking has run.

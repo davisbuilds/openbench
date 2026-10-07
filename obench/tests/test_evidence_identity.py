@@ -33,7 +33,8 @@ class EvidenceIdentityTests(unittest.TestCase):
         self.assertEqual(ra.implementation(), before)
         for relative in ('obench/sandbox_gateway.py', 'obench/harbor_sandbox.py',
                          'obench/repair_worker.py', 'obench/frozen_context.py',
-                         'obench/harbor_agents/sandbox_codex.py', 'obench/evidence_identity.py'):
+                         'obench/harbor_agents/sandbox_codex.py', 'obench/evidence_identity.py',
+                         'obench/__main__.py', 'obench/cli.py'):
             current = ra.implementation()
             self.change(relative)
             self.assertNotEqual(ra.implementation(), current, relative)
@@ -88,3 +89,16 @@ class EvidenceIdentityTests(unittest.TestCase):
             self.change('obench/repair_workflow.py')
             with self.assertRaisesRegex(ValueError, 'changed after import'):
                 rw.identity()
+
+    def test_cli_unconditional_and_unrecognized_dispatch_dependencies_are_bound(self):
+        before = ra.implementation()
+        self.assertIn('obench/__main__.py', before)
+        self.assertIn('obench/cli.py', before)
+        self.assertNotIn('obench/report.py', before)
+        cli = self.root/'obench/cli.py'
+        original = cli.read_text()
+        cli.write_text(original + '\nfrom . import report\n')
+        self.assertIn('obench/report.py', ra.implementation())
+        # A newly expressed routing condition is conservatively traversed.
+        cli.write_text(original.replace('if command == "report":', 'if command in ("report", "run"):'))
+        self.assertIn('obench/report.py', ra.implementation())
