@@ -168,3 +168,20 @@ the precise task, implementation, source and workflow identities used. A
 recomputed passing report does not itself complete admission: saved-receipt
 comparisons must also succeed before the operation is marked passed. These
 records support diagnosis; they cannot replace authoritative replay on launch.
+
+## Portable quality regression lane
+
+Hosted Harbor CI runs `scripts/ci/verify_repair_quality.py` against real isolated
+workers and the pinned Codex harness with a fake provider. Public synthetic
+controls cover v6 polarity, two alternative identity implementations, each
+scoring bucket, and the two source-identity defects. The lane proves an edited
+failed receipt reaches replay and is rejected there; it also checks partial
+validation evidence, an actual failed workflow and both worker error protocols.
+
+Two complete runs use fresh containers and must agree on every named verdict.
+Three fixed seeds vary plugin names, displayed names, multiplicity, versions and
+non-plugin paths. Seeded invariants are diagnostic controls only; they do not
+alter any oracle revision or historical score. The summary contains a
+check-by-control matrix and all seeded outcomes. CI retains only this synthetic
+summary, not harness transcripts. This coverage is a development test set, not
+an independent benchmark holdout or evidence of model difficulty.
