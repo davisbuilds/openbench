@@ -126,13 +126,15 @@ def launch_campaign(suite, *, harbor_binary='harbor', admission=None, quality=()
     jobs = plan_jobs(compiled)
     from . import runtime_admission
     admission_hash = None
+    quality_evidence = None
     if qualify and not auth_file:
         raise CampaignError('qualification requires an explicit local OAuth file')
     if compiled.suite.sandbox and not qualify:
         if not admission:
             raise CampaignError('repair campaigns require --admission from a passing qualification')
         from .repair_validation import validate_campaign
-        validate_campaign(compiled, quality)
+        quality_evidence = Path(compiled.config.results_dir) / 'admission-attempts' / uuid.uuid4().hex
+        validate_campaign(compiled, quality, evidence_dir=quality_evidence)
         expected = runtime_admission.fingerprint(compiled, harbor_binary)
         runtime_admission.validate_admission(admission, expected)
         admission_hash = runtime_admission.digest(admission)
@@ -155,6 +157,7 @@ def launch_campaign(suite, *, harbor_binary='harbor', admission=None, quality=()
               'manifest_sha256': compiled.manifest_sha256, 'mode': 'qualify' if qualify else 'run',
               'admission': str(Path(admission).resolve()) if admission else None,
               'admission_sha256': admission_hash,
+              'quality_evidence': str(quality_evidence) if quality_evidence else None,
               'quality': {str(Path(p).resolve()): runtime_admission.digest(p) for p in quality},
               'auth_file': str(Path(auth_file).expanduser().absolute()) if qualify else None,
               'manifest': compiled.manifest, 'harbor_binary': str(Path(harbor).absolute()),
@@ -200,7 +203,7 @@ def execute(directory):
                         quality = launch.get('quality', {})
                         if any(runtime_admission.digest(p) != digest for p, digest in quality.items()):
                             raise CampaignError('quality evidence changed after launch')
-                        validate_campaign(compiled, quality)
+                        validate_campaign(compiled, quality, evidence_dir=directory / 'dispatch-admission')
                         admission = launch['admission']
                         if runtime_admission.digest(admission) != launch['admission_sha256']:
                             raise CampaignError('admission changed after launch')
@@ -286,6 +289,8 @@ def campaign_status(directory):
             'log': str(log), 'last_log_update_unix': log.stat().st_mtime if log.exists() else None,
             'last_trial_result_unix': latest, 'trial_results': trials,
             'transport_outcomes': dict(outcomes), 'unreadable_evidence': errors,
+            'quality_evidence': {'launch': launch.get('quality_evidence'),
+                                 'dispatch': str(directory / 'dispatch-admission') if (directory / 'dispatch-admission').exists() else None},
             'completion': finished}
 
 

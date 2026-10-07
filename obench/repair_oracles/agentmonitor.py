@@ -19,11 +19,13 @@ const requests=JSON.parse(fs.readFileSync(0,'utf8'));
 const results=[];
 let serial=0;
 for (const request of requests) {
+  let operation='setup';
   try {
     connection.closeDb();
     for(const suffix of ['', '-wal', '-shm']) fs.rmSync(database+suffix,{force:true});
     const values=[];
-    for (const step of request.steps) {
+    for (const [index, step] of request.steps.entries()) {
+      operation=String(index)+':'+String(step.op);
       let value=null;
       switch(step.op) {
         case 'init': schema.initSchema(); break;
@@ -52,7 +54,8 @@ for (const request of requests) {
       values.push(value===undefined?null:value);
     }
     results.push({ok:true,value:values});
-  } catch (_) {results.push({ok:false});}
+  } catch (error) {results.push({ok:false,error:{type:String(error?.name||'Error').slice(0,128),
+    message:String(error?.message||error).slice(0,1024),operation:operation.slice(0,128)}});}
   finally {process.chdir(root);connection.closeDb();}
 }
 process.stdout.write(JSON.stringify({schema:1,results}));

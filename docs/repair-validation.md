@@ -140,3 +140,31 @@ and writable project-local `node_modules` scratch space. Packages remain immutab
 in the offline image and resolve through `/node_modules`; no dependency links are
 placed in the exported source tree. The synthetic Git baseline excludes generated
 dependency scratch space. Rebuild by digest and renew admission after changes.
+
+## Durable operation evidence
+
+`repair replay` and `repair validate` with `--output FILE` also create a private
+`FILE.evidence/` directory. Override it with `--evidence-dir DIRECTORY` (which
+also works without `--output`). Each completed control is atomically published
+before the next begins. The operation records stage timing, errors and a final
+status. Persistence failures abort validation; unfinished attempts never pass.
+A process killed without cleanup is reported as interrupted using its execution
+lock, while completed controls remain available.
+
+```sh
+obench repair status /private/quality.json.evidence --json
+```
+
+This read-only command returns blockers, stage timing, and hashed evidence paths;
+exit 2 means incomplete, interrupted or invalid evidence. Per-check worker
+exceptions include bounded type, message and operation details. They are
+untrusted candidate observations, not proof of an infrastructure failure.
+
+Campaign launch retains fresh controls under `results_dir/admission-attempts/`;
+failed attempts remain there even when no campaign launches. The supervisor
+records its separate fresh replay under `campaign/dispatch-admission/`.
+`campaign status` links both directories. Inspect the final result artifact for
+the precise task, implementation, source and workflow identities used. A
+recomputed passing report does not itself complete admission: saved-receipt
+comparisons must also succeed before the operation is marked passed. These
+records support diagnosis; they cannot replace authoritative replay on launch.
