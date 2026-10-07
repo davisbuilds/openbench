@@ -275,7 +275,35 @@ def _validate_receipt(path, task, image):
     validate_workflow(workflow['path'], info, image, workflow['project_check'])
     if assess_controls(value['controls'], info):
         raise ValueError('quality receipt has failing or incomplete controls')
-    return value
+    # Hashing source bytes cannot authenticate claims about their behavior.
+    # Reconstruct controls from the bound specification and use the production
+    # confined grader again; saved pass/score fields never authorize dispatch.
+    fresh = validate(task, value['controls_path'], image, workflow['path'])
+    if fresh['status'] != 'passed':
+        raise ValueError('recomputed quality controls failed: ' + '; '.join(fresh['findings']))
+    if (fresh['controls_sha256'] != value['controls_sha256']
+            or fresh['task'] != info or fresh['workflow'] != workflow):
+        raise ValueError('quality specification or workflow changed during admission')
+    def declared(records):
+        return [{key: record[key] for key in ('id', 'role', 'source', 'must_fail')}
+                for record in records]
+    if declared(fresh['controls']) != declared(value['controls']):
+        raise ValueError('quality controls differ from the bound specification')
+    for saved, current in zip(value['controls'], fresh['controls'], strict=True):
+        # Raw observations include fresh worker paths/timestamps. Compare the
+        # semantic verdicts and return newly derived observations, never the
+        # stored ones. Do not normalize candidate-controlled strings.
+        def verdict(record):
+            result = record['result']
+            grading = result['grading']
+            return {'solved': result['solved'], 'source_sha256': result['source_sha256'],
+                    'score': grading['score'], 'buckets': grading.get('buckets'),
+                    'candidate_failure': grading.get('candidate_failure'),
+                    'checks': [{k: check[k] for k in ('id', 'bucket', 'pass')}
+                               for check in grading['checks']]}
+        if fingerprint(verdict(saved)) != fingerprint(verdict(current)):
+            raise ValueError('saved verdict differs from recomputed grading observations')
+    return fresh
 
 
 def validate_campaign(compiled, paths):

@@ -110,6 +110,9 @@ obench campaign launch suite.toml --admission /private/runtime/admission.json \
 
 Provide exactly one quality receipt per task. Launch checks task bindings,
 image, implementation, control specification/source hashes and workflow evidence.
+Admission reconstructs controls from the bound specification and replays each
+through the confined grader; saved verdicts alone cannot authorize execution.
+This requires Docker and adds control-replay time at launch and dispatch.
 The supervisor repeats validation before execution and checks receipt hashes
 against launch intent. Missing, failed or stale receipts block dispatch. Runtime
 qualification retains its separate authentication/boundary controls. Direct

@@ -169,3 +169,100 @@ class ReceiptInputTests(unittest.TestCase):
                 receipt.write_text(json.dumps(value))
                 with self.assertRaisesRegex(ValueError, 'malformed'):
                     rv.validate_campaign(SimpleNamespace(task_sets=[]), [receipt])
+
+
+class ReceiptVerdictTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        fixture = QualityControlsTests()
+        fixture.setUp()
+        self.records = fixture.records
+        self.info = {**fixture.info, 'task': str(self.root/'task'),
+                     'task_binding': {}, 'source_prefix': 'src'}
+        self.image = 'sha256:' + 'b'*64
+        self.controls = self.root/'controls.json'
+        self.workflow = self.root/'workflow.json'
+        self.receipt = self.root/'quality.json'
+        specs = []
+        self.results = {}
+        for record in self.records:
+            source = self.root/record['id']
+            if record['role'] == 'baseline':
+                source = self.root/'task/environment/app'
+            (source/'src').mkdir(parents=True)
+            (source/'src/example.ts').write_text(record['id'])
+            result = {**record['result'], 'task': self.info, 'image': self.image,
+                      'implementation': rv.implementation(),
+                      'source_sha256': rv.source_hashes(source, self.info)}
+            self.results[str(source)] = result
+            specs.append({k: record[k] for k in ('id', 'role', 'must_fail')} | {'source': str(source)})
+        self.controls.write_text(json.dumps({'schema': 1, 'contract_review': 'reviewed controls',
+                                             'project_check': 'true', 'controls': specs}))
+        evidence = {}
+        for name in ('agent/codex.txt', 'agent/developer-workflow.json', 'requests.jsonl', 'gateway.jsonl'):
+            file = self.root/name
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text(name)
+            evidence[name] = rv.sha(file)
+        self.workflow.write_text(json.dumps({
+            'status': 'passed', 'cleanup_confirmed': True, 'live_inference': False,
+            'real_credentials': False, 'actual_tool_mutation': True, 'tool_result_returned': True,
+            'final_response_present': True, 'developer_workflows_passed': True,
+            'runtime_image': self.image, 'task': self.info['task'], 'task_binding': {},
+            'project_check': 'true', 'probe_sha256': rv.sha(rv.ROOT/'scripts/local/verify_repair_codex.py'),
+            'validation_sha256': rv.sha(Path(rv.__file__)), 'evidence_sha256': evidence}))
+        # Isolate only task discovery and external Docker grading. Specification,
+        # source/evidence files, hashing, control assessment and receipt parsing
+        # use the production paths. Real Docker controls cover both task families.
+        self.inspect = patch.object(rv, 'inspect_task', return_value=self.info)
+        self.inspect.start(); self.addCleanup(self.inspect.stop)
+        self.grader = patch.object(rv, 'replay', side_effect=lambda task, source, image:
+                                  copy.deepcopy(self.results[str(source)]))
+        self.replay = self.grader.start(); self.addCleanup(self.grader.stop)
+
+    def produce(self):
+        return rv.validate(self.info['task'], self.controls, self.image, self.workflow)
+
+    def admit(self, receipt):
+        self.receipt.write_text(json.dumps(receipt))
+        return rv.validate_receipt(self.receipt, self.info['task'], self.image)
+
+    def test_untampered_receipt_recomputes_all_control_results(self):
+        receipt = self.produce()
+        self.replay.reset_mock()
+        self.admit(receipt)
+        self.assertEqual(self.replay.call_count, len(self.records))
+
+    def test_admission_returns_fresh_observations_instead_of_saved_claims(self):
+        receipt = self.produce()
+        receipt['controls'][1]['result']['grading']['checks'][0]['observed'] = {'forged': True}
+        self.results[str(self.root/'reference')]['grading']['checks'][0]['observed'] = {'worker_path': '/tmp/fresh-worker'}
+        admitted = self.admit(receipt)
+        self.assertEqual(admitted['controls'][1]['result']['grading']['checks'][0]['observed'],
+                         {'worker_path': '/tmp/fresh-worker'})
+
+    def test_failed_reference_cannot_be_promoted_by_editing_saved_verdicts(self):
+        result = self.results[str(self.root/'reference')]
+        result['solved'] = False
+        result['grading']['score'] = 0
+        result['grading']['checks'][0]['pass'] = False
+        receipt = self.produce()
+        self.assertEqual(receipt['status'], 'failed')
+        receipt['status'] = 'passed'
+        receipt['findings'] = []
+        stored = receipt['controls'][1]['result']
+        stored['solved'] = True
+        stored['grading']['score'] = 1
+        stored['grading']['checks'][0]['pass'] = True
+        self.assertEqual(rv.assess_controls(receipt['controls'], self.info), [])
+        with self.assertRaisesRegex(ValueError, 'recomputed'):
+            self.admit(receipt)
+
+    def test_control_targets_cannot_be_edited_independently_of_specification(self):
+        receipt = self.produce()
+        receipt['controls'][0]['must_fail'] = ['identity']
+        self.assertEqual(rv.assess_controls(receipt['controls'], self.info), [])
+        with self.assertRaisesRegex(ValueError, 'specification'):
+            self.admit(receipt)
