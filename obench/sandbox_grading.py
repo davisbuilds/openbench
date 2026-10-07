@@ -68,13 +68,20 @@ def invoke(case):
         return rollout_codex.surface_mismatch(parse_block(case['live']),read(case['recorded']))
     raise ValueError('unknown operation')
 
+def diagnostic(get_value, limit, fallback):
+    try:
+        return str(get_value())[:limit]
+    except BaseException:
+        return fallback
+
 result = []
 for case in request['cases']:
     try:
         result.append({'ok':True,'value':invoke(case)})
     except Exception as exc:
-        result.append({'ok':False, 'error':{'type':type(exc).__name__[:128],
-                      'message':str(exc)[:1024], 'operation':str(case.get('op', 'unknown'))[:128]}})
+        result.append({'ok':False, 'error':{'type':diagnostic(lambda: type(exc).__name__, 128, 'Exception'),
+                      'message':diagnostic(lambda: str(exc), 1024, '<unprintable exception>'),
+                      'operation':diagnostic(lambda: case.get('op', 'unknown'), 128, 'unknown')}})
 sys.stdout.write(json.dumps({'schema':1,'results':result},allow_nan=False))
 '''
 

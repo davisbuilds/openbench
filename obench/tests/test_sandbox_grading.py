@@ -211,6 +211,38 @@ class TaskBindingTests(unittest.TestCase):
 
 @unittest.skipUnless(IMAGE and BASE.is_dir(), 'set OBENCH_GRADING_TEST_IMAGE to a pinned local image ID')
 class DockerGradingTests(unittest.TestCase):
+    def test_unprintable_python_exception_preserves_other_check_results(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            allowed = self.prepare(root, ('budget.py', 'rollout_codex.py'))
+            file = root/'scripts/profiles/rollout_codex.py'
+            with file.open('a') as stream:
+                stream.write("\nclass BadMessage(Exception):\n    def __str__(self):\n        raise RuntimeError('formatting failed')\ndef read_rollout(*args):\n    raise BadMessage()\n")
+            result = grade_dojo(root, allowed, IMAGE, oracle_version=5)
+            self.assertNotIn('candidate_failure', result)
+            self.assertTrue(result['buckets']['budget'])
+            self.assertEqual(result['checks'][0]['observed']['error']['message'], '<unprintable exception>')
+
+    def test_throwing_node_error_getters_preserve_next_request(self):
+        from obench import repair_worker
+        from obench.repair_oracles import agentmonitor
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(REPO/'benchmarks/harbor/local/am-benchmark-pr106-c2-o3/environment/app/src', root/'src')
+            # Candidate exception crosses the real production catch handler.
+            file = root/'src/db/schema.ts'
+            source = file.read_text()
+            target = 'export function initSchema(): void {'
+            self.assertIn(target, source)
+            file.write_text(source.replace(target, target + "\nthrow {get name(){throw Error('name getter');},get message(){throw Error('message getter');}};", 1))
+            permitted = {p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file()}
+            archive, _ = source_archive(root, permitted)
+            observed, _ = repair_worker.run_worker(IMAGE, archive,
+                [{'steps': [{'op': 'init'}]}, {'steps': []}], program=agentmonitor.worker_program())
+            self.assertEqual(observed[0], {'ok': False, 'error': {'type': 'Error',
+                'message': '<unprintable exception>', 'operation': '0:init'}})
+            self.assertEqual(observed[1], {'ok': True, 'value': []})
+
     def test_v5_budget_observations_are_not_a_gating_requirement(self):
         for wrong_mode, corrupt_count, expected in ((False, False, 1), (True, False, .6667),
                                                    (False, True, .6667)):

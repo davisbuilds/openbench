@@ -17,6 +17,10 @@ const benchmark=await import('./src/import/benchmark.ts');
 const v2=await import('./src/db/v2-queries.ts');
 const requests=JSON.parse(fs.readFileSync(0,'utf8'));
 const results=[];
+function diagnostic(getValue, limit, fallback) {
+  try {return String(getValue()).slice(0,limit);}
+  catch (_) {return fallback;}
+}
 let serial=0;
 for (const request of requests) {
   let operation='setup';
@@ -54,8 +58,8 @@ for (const request of requests) {
       values.push(value===undefined?null:value);
     }
     results.push({ok:true,value:values});
-  } catch (error) {results.push({ok:false,error:{type:String(error?.name||'Error').slice(0,128),
-    message:String(error?.message||error).slice(0,1024),operation:operation.slice(0,128)}});}
+  } catch (error) {results.push({ok:false,error:{type:diagnostic(()=>error?.name||'Error',128,'Error'),
+    message:diagnostic(()=>error?.message||error,1024,'<unprintable exception>'),operation:operation.slice(0,128)}});}
   finally {process.chdir(root);connection.closeDb();}
 }
 process.stdout.write(JSON.stringify({schema:1,results}));
