@@ -35,7 +35,7 @@ from obench.harbor_sandbox import RepairSandbox, docker_bytes, validate_image
 MARKER = "OPENBENCH_OFFLINE_CODEX_TOOL_PROBE"
 FINAL = "Offline tool transport verified."
 FAKE = r'''
-import base64,http.server,http.client,json,os,signal,threading,sys
+import base64,http.server,http.client,json,os,re,signal,threading,sys
 from pathlib import Path
 from obench.sandbox_gateway import BrokerServer,GatewayConfig,AuthCredentials,UpstreamStream
 import obench.sandbox_gateway as gateway
@@ -50,8 +50,13 @@ class Provider(http.server.BaseHTTPRequestHandler):
   body=self.rfile.read(int(self.headers['Content-Length']))
   with Path('/run/private/requests.jsonl').open('ab') as output: output.write(body+b'\n')
   request=json.loads(body)
-  has_output=any(item.get('type') in ('custom_tool_call_output','function_call_output') for item in request['input'])
-  if has_output:
+  outputs=[item for item in request['input'] if item.get('type') in ('custom_tool_call_output','function_call_output')]
+  has_output=bool(outputs)
+  pending=re.search(r'Script running with cell ID ([^\s]+)', str(outputs[-1].get('output',''))) if outputs else None
+  if pending:
+   serial=str(len(outputs))
+   item={'id':'wait_'+serial,'type':'function_call','call_id':'call_wait_'+serial,'name':'wait','arguments':json.dumps({'cell_id':pending[1],'yield_time_ms':60000}), 'status':'completed'}
+  elif has_output:
    item={'id':'msg_offline','type':'message','role':'assistant','content':[{'type':'output_text','text':'Offline tool transport verified.'}]}
   else:
    namespaces=[tool for block in request['input'] if block.get('type')=='additional_tools' for tool in block.get('tools',[])]
@@ -74,7 +79,7 @@ def transport(body,headers,timeout):
  connection=http.client.HTTPConnection(*provider.server_address,timeout=timeout)
  connection.request('POST','/fake-provider',body,headers)
  return UpstreamStream(connection,connection.getresponse())
-broker=BrokerServer('/run/openbench-model/gateway.sock',GatewayConfig(sys.argv[1],sys.argv[2],3,8*1024*1024,30),AuthCredentials('offline-fake-token','offline-fake-account'),transport=transport)
+broker=BrokerServer('/run/openbench-model/gateway.sock',GatewayConfig(sys.argv[1],sys.argv[2],8,8*1024*1024,30),AuthCredentials('offline-fake-token','offline-fake-account'),transport=transport)
 Path('/run/private/fake.pid').write_text(str(os.getpid()))
 def stop(*_): threading.Thread(target=broker.stop,daemon=True).start()
 signal.signal(signal.SIGTERM,stop)
@@ -102,17 +107,23 @@ async def run(args):
                "runtime_image": image, "codex_version": CLI_VERSION,
                "model_alias": args.model, "model": model, "effort": effort,
                "probe_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+    from obench.repair_validation import inspect_task, workflow_command
+    from obench import repair_validation
+    receipt['validation_sha256'] = hashlib.sha256(Path(repair_validation.__file__).read_bytes()).hexdigest()
+    inspected = inspect_task(args.task)
+    receipt.update(task=str(args.task.resolve()), task_binding=inspected['task_binding'])
     app = args.task / 'environment/app'
     registered = 'src/import/benchmark.ts' if (app / 'src').is_dir() else None
     target = registered or 'scripts/profiles/__init__.py'
     prefix = '//' if registered else '#'
-    command = "set -eu\npython3 -m obench.repair_devtools check > /logs/agent/developer-workflow.json\n"
+    command = "set -eu\ntest -n \"${BASH_VERSION:-}\"\ntest \"$(printf '%s ' {alpha,beta})\" = 'alpha beta '\npython3 -m obench.repair_devtools check > /logs/agent/developer-workflow.json\n"
     command += "test -z \"$(git status --porcelain)\"\ntest \"$(git rev-list --count HEAD)\" = 1\ntest -z \"$(git remote)\"\n"
-    if getattr(args, 'project_check', None):
-        command += args.project_check + '\n'
-    elif (app / 'tests').is_dir():
-        command += ('pnpm run typecheck\npnpm test\n' if registered
-                    else 'python3 -m pytest -q\n')
+    project_check = getattr(args, 'project_check', None)
+    if not project_check and (app / 'tests').is_dir():
+        project_check = 'pnpm run typecheck && pnpm test' if registered else 'python3 -m pytest -q'
+    receipt['project_check'] = project_check
+    if project_check:
+        command += workflow_command(project_check) + '\n'
     command += "printf '\\n" + prefix + " " + MARKER + "\\n' >> " + shlex.quote('/app/' + target) + "\n"
     command += "git diff -- " + shlex.quote(target) + " | rg " + shlex.quote(MARKER) + "\n"
     command += "mkdir /tmp/codex-cleanup-check\nprintf disposable > /tmp/codex-cleanup-check/file\nrm -r /tmp/codex-cleanup-check\ntest ! -e /tmp/codex-cleanup-check\n"
@@ -214,7 +225,7 @@ async def run(args):
                 "OPENBENCH_CODEX_AUTH_RETURN_PATH": str(root / "return.json")})
         await env.start()
         await agent.setup(env)
-        await asyncio.wait_for(agent.run("Run the requested developer workflow checks, add the harmless probe comment, then confirm completion.", env, AgentContext()), 90)
+        await asyncio.wait_for(agent.run("Run the requested developer workflow checks, add the harmless probe comment, then confirm completion.", env, AgentContext()), 240)
         await env.download_dir("/logs/agent", output / "agent")
         receipt["frozen_source"] = await env.freeze_source(output / "source")
         text = (output / "agent/codex.txt").read_text()
@@ -248,8 +259,8 @@ async def run(args):
         receipt['developer_environment'] = developer
         if f"Model metadata for `{model}` not found" in text:
             raise RuntimeError("pinned CLI lacks the selected model metadata")
-        if len(requests) != 2 or not any(item.get("type") == "custom_tool_call_output" for item in requests[-1]["input"]):
-            raise RuntimeError("expected the actual two-request tool loop")
+        if not 2 <= len(requests) <= 8 or not any(item.get("type") == "custom_tool_call_output" for item in requests[-1]["input"]):
+            raise RuntimeError("expected the actual completed tool loop")
         sessions = list((output / 'agent/sessions').rglob('*.jsonl'))
         if len(sessions) != 1:
             raise RuntimeError('expected one raw Codex session')
@@ -279,6 +290,9 @@ async def run(args):
             raise RuntimeError("injected broker did not drain cleanly")
         receipt.update(status="passed", actual_tool_mutation=True, tool_result_returned=True, final_response_present=True,
                        request_count=len(requests), gateway_ledger_sha256=hashlib.sha256((output / "gateway.jsonl").read_bytes()).hexdigest())
+        receipt['evidence_sha256'] = {name: hashlib.sha256((output / name).read_bytes()).hexdigest()
+                                     for name in ('agent/codex.txt', 'agent/developer-workflow.json',
+                                                  'requests.jsonl', 'gateway.jsonl')}
     except BaseException as error:
         receipt.update(status="failed", error_type=type(error).__name__, error=str(error))
         raise

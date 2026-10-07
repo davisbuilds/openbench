@@ -22,6 +22,20 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
+### Repair benchmark calibration
+
+- **What**: Runtime isolation and passing repair controls do not establish
+  specification completeness or frontier-discriminating difficulty.
+- **Evidence**: The October 2026 Dojo audit found both unrealistic hidden locator
+  fixtures and missing source-identity checks. Two tasks with one attempt per
+  model were insufficient for a reliability comparison.
+- **Next**: Expand realistic PR-derived candidates, independently review contracts
+  and alternative repairs, then use repeated attempts with held-out PR families.
+  Keep current cases as controls. Model runs remain on hold during the repair
+  quality/tooling pass. Consider iterative extension and real workload performance
+  cases after behavioral admission; avoid selecting only failures by current models.
+
+
 ### Runner throughput
 
 #### Candidate dispatch through the matrix runner

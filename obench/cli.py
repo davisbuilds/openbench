@@ -26,6 +26,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("campaign", help="launch and inspect persistent local campaigns", add_help=False)
+    sub.add_parser("repair", help="inspect, replay and validate isolated repair quality", add_help=False)
     sub.add_parser("run", help="run a Harbor-native benchmark suite", add_help=False)
     sub.add_parser(
         "legacy",
@@ -97,14 +98,14 @@ def main(argv=None):
         return 0
 
     known = {
-        "campaign", "run", "legacy", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
+        "repair", "campaign", "run", "legacy", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
         "matrix", "bridge", "results", "publish", "verify", "community", "leaderboard",
         "site", "pack", "export",
         "import",
     }
     if command not in known:
         parser.error(
-            f"unknown command {command!r}; choose from run, legacy, report, doctor, "
+            f"unknown command {command!r}; choose from campaign, repair, run, legacy, report, doctor, "
             "validate, admit, gateway, router, harbor, gate, compare, init, publish, verify, community, "
             "leaderboard, results, site, pack, export, import, matrix, bridge"
         )
@@ -112,6 +113,9 @@ def main(argv=None):
     if command == "campaign":
         from .campaign import main as campaign_main
         return campaign_main(rest)
+    if command == "repair":
+        from .repair_validation import main as repair_main
+        return repair_main(rest)
     if command == "results":
         from .results_query import main as results_main
         return results_main(rest)

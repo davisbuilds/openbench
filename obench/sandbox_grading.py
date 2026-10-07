@@ -27,6 +27,8 @@ from obench import repair_identity
 # Bind the implementation loaded by this process, not a later edit on disk.
 _LOADED_GRADER_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 _LOADED_REVISION_SHA256 = hashlib.sha256(Path(repair_identity.__file__).read_bytes()).hexdigest()
+_DOJO_V6_FILE = Path(repair_identity.__file__).parent / 'repair_oracles/dojo_v6.py'
+_LOADED_DOJO_V6_SHA256 = hashlib.sha256(_DOJO_V6_FILE.read_bytes()).hexdigest()
 
 MAX_SOURCE = 2 * 1024 * 1024
 MAX_OUTPUT = 128 * 1024
@@ -122,6 +124,12 @@ def task_manifest(task_root: Path) -> dict:
             repair_identity.resolve(metadata)
         except ValueError as exc:
             raise GradingError(str(exc)) from exc
+    # New oracle bytes are sealed without changing historical oracle behavior.
+    oracle_hashes = {}
+    if metadata.get('openbench_revision', {}).get('oracle_revision') == 6:
+        if hashlib.sha256(_DOJO_V6_FILE.read_bytes()).hexdigest() != _LOADED_DOJO_V6_SHA256:
+            raise GradingError('trusted Dojo oracle changed after import')
+        oracle_hashes = {'dojo_v6': _LOADED_DOJO_V6_SHA256}
     files = {}
     file_modes = {}
     directory_modes = {}
@@ -147,6 +155,7 @@ def task_manifest(task_root: Path) -> dict:
         'grading_module_sha256': _LOADED_GRADER_SHA256,
         'revision_module_sha256': _LOADED_REVISION_SHA256,
         'worker_entry_sha256': hashlib.sha256(WORKER.encode()).hexdigest(),
+        **({'oracle_implementation_sha256': oracle_hashes} if oracle_hashes else {}),
     }
 
 
@@ -407,14 +416,19 @@ def comparison(value, expected, *, oracle_version=3):
 
 def grade_dojo(root, permitted, image, *, timeout=30, oracle_version=3):
     archive, hashes = source_archive(Path(root),set(permitted))
+    if oracle_version == 6:
+        from .repair_oracles import dojo_v6
+        results, receipt = run_worker(image, archive, [case[2] for case in dojo_v6.cases()], timeout=timeout)
+        return {**dojo_v6.grade(results), 'source_sha256': hashes, 'worker': receipt}
     cases=dojo_cases(oracle_version=oracle_version)
     results, receipt=run_worker(image,archive,[case[1] for case in cases],timeout=timeout)
     buckets={name:True for name in ('rollout','budget','mismatch')}
     checks=[]
-    for (bucket,_,expected), result in zip(cases,results):
+    for index, ((bucket,_,expected), result) in enumerate(zip(cases,results)):
         passed=result['ok'] and comparison(result.get('value'),expected,oracle_version=oracle_version)
         buckets[bucket] &= passed
-        checks.append({'bucket':bucket,'pass':passed})
+        checks.append({'id': f'dojo-v{oracle_version}-{index:03}',
+                       'bucket':bucket,'pass':passed,'expected':expected,'observed':result})
     return {'score':round(sum(buckets.values())/3,4),'buckets':buckets,'checks':checks,
             'source_sha256':hashes,'worker':receipt,'oracle_version':oracle_version}
 

@@ -21,7 +21,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && python3 -m pip install --no-cache-dir PyYAML==6.0.3 pytest==8.3.5 \
          iniconfig==2.1.0 packaging==25.0 pluggy==1.6.0 \
     && groupadd --gid 10001 solver \
-    && useradd --uid 10001 --gid 10001 --create-home solver \
+    && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash solver \
     && mkdir -p /app /logs/agent /logs/verifier /logs/artifacts /installed-agent /run/openbench-model \
     && codex --version
 COPY --from=node /opt/repair-deps /opt/repair-deps
@@ -29,11 +29,14 @@ RUN ln -s /opt/repair-deps/node_modules /node_modules \
     && ln -s /opt/repair-deps/node_modules/typescript/bin/tsc /usr/local/bin/tsc \
     && ln -s /opt/repair-deps/node_modules/tsx/dist/cli.mjs /usr/local/bin/tsx \
     && ln -s /opt/repair-deps/node_modules/eslint/bin/eslint.js /usr/local/bin/eslint \
+    && ln -s /opt/repair-deps/node_modules/@tailwindcss/cli/dist/index.mjs /usr/local/bin/tailwindcss \
+    && ln -s /opt/repair-deps/node_modules/vite/bin/vite.js /usr/local/bin/vite \
+    && ln -s /opt/repair-deps/node_modules/svelte-check/bin/svelte-check /usr/local/bin/svelte-check \
     && node -e "const DB=require('/node_modules/better-sqlite3'); const db=new DB(':memory:'); db.prepare('SELECT 1').get(); db.close()"
 COPY obench/ /opt/openbench/obench/
 ENV PYTHONPATH=/opt/openbench PYTHONDONTWRITEBYTECODE=1 HOME=/home/solver \
     PATH=/opt/repair-deps/node_modules/.bin:$PATH \
     npm_config_cache=/tmp/npm-cache npm_config_offline=true \
     PIP_NO_INDEX=1 PNPM_HOME=/tmp/pnpm XDG_CACHE_HOME=/tmp/cache
-LABEL org.openbench.developer-environment="2"
+LABEL org.openbench.developer-environment="3"
 WORKDIR /app

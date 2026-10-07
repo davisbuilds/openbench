@@ -26,8 +26,9 @@ host, with persistent logs and a completion/exit-code receipt. Do not substitute
 launch, and report the session name, host, result path and next status check.
 Follow [the campaign launch checklist](docs/benchmark-operations.md). For
 checkout-based isolated repair campaigns, use `obench campaign qualify` then
-`obench campaign launch --admission ...`; the wrapper supervises canonical
-`obench run` and rejects missing or stale runtime admission. Inspect with
+`obench campaign launch --admission ... --quality ...`; the wrapper supervises canonical
+`obench run` and rejects missing or stale runtime admission. Repair campaigns also require one current task-quality receipt per task; see
+[repair validation](docs/repair-validation.md). Inspect with
 `obench campaign status`. Direct `obench run` remains the control/diagnostic and
 verified Harbor-resume entry point.
 

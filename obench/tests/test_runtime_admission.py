@@ -114,8 +114,11 @@ class RuntimeAdmissionTests(unittest.TestCase):
             admission.validate_model_controls(self.root, expected, records, missing)
         path = self.root / records['gpt-6-luna-max']['receipt']
         original = json.loads(path.read_text())
+        write_record(path, {**original, 'request_count': 4})
+        admission.validate_model_controls(self.root, expected, records, evidence)
         for change in ({'effort':'low'}, {'model':'gpt-5.6-terra'}, {'status':'failed'},
-                       {'codex_version':'0.154.0'}, {'actual_tool_mutation':False}):
+                       {'codex_version':'0.154.0'}, {'actual_tool_mutation':False},
+                       {'request_count':1}, {'request_count':9}, {'request_count':True}):
             write_record(path, {**original, **change})
             with self.subTest(change=change), self.assertRaisesRegex(admission.AdmissionError, 'execution treatment'):
                 admission.validate_model_controls(self.root, expected, records, evidence)

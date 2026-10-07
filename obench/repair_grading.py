@@ -29,6 +29,8 @@ def grade_submission(root, oracle, image, *, timeout=90):
         observations,worker=repair_worker.run_worker(image,archive,
             [request for _,_,request in module.cases()],program=module.worker_program(),timeout=timeout)
         graded=module.grade(observations)
+        for check, observed in zip(graded['checks'], observations, strict=True):
+            check.update(id=check['case'], observed=observed)
         return {**graded,'source_sha256':hashes,'worker':{**worker,'runtime_dependencies':runtime},'oracle_id':oracle.id,'protocol':oracle.protocol}
     except CandidateFailure as exc:
         graded=module.grade([{'ok':False} for _ in module.cases()])

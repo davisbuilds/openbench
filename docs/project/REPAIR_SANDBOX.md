@@ -57,8 +57,8 @@ archives, preserving project guidance and executable file modes.
 
 ### Developer environment (default for new repairs)
 
-`build_repair_runtime.py` builds developer environment revision 2, tagged
-`dev-v2-codex-0.157.0` for convenience. Suites must use its immutable image ID.
+`build_repair_runtime.py` builds developer environment revision 3, tagged
+`dev-v3-codex-0.157.0` for convenience. Suites must use its immutable image ID.
 The build receipt records the context hashes, effective tool versions and passing
 nonroot, read-only-root, offline developer workflow checks. An image digest is
 the exact treatment identity; the label is a human-readable feature revision.
@@ -72,6 +72,11 @@ the exact treatment identity; the label is a human-readable feature revision.
   config, including an unused-variable negative control. Python supplies pinned
   PyYAML and pytest. Packages are preinstalled; no runtime install or registry
   access is needed. npm defaults offline and pip disables index lookup.
+- Revision 3 adds pinned Tailwind/Svelte/Vite dependencies, Bash as the solver
+  login shell, and writable local `node_modules` scratch space. Packages resolve
+  through the immutable `/node_modules` ancestor; exports contain no dependency
+  symlinks. Actual-harness workflow receipts bind the exact task/image, command
+  and execution logs; see [repair validation](../repair-validation.md).
 - Every workspace gets one synthetic Git baseline, no remotes or original
   history. Git objects live in private scratch space rather than the exported
   source archive. A regular `.git` pointer supports status/diff and is excluded
@@ -87,7 +92,9 @@ the exact treatment identity; the label is a human-readable feature revision.
   The harness may still reject force-removal commands; ordinary `rm -r` cleanup
   is exercised successfully rather than changing Codex's policy.
 
-Use `am-benchmark-pr106-c2-o3` and `dojo-evidence-pr60-c3-o5` for new screens.
+New screens require a qualified pre-fix checkout and current quality receipts.
+Historical Dojo oracles 3–5 remain replayable but are quarantined from new
+campaign admission; use oracle 6 with a reviewed case contract.
 Their case revisions advance because the model sees additional public pre-fix
 regression tests and development instructions. Historical source/aliases remain
 available and oracle behavior is unchanged. AgentMonitor remains a backend

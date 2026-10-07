@@ -162,3 +162,10 @@ Finalized canonical resume revalidates completed Harbor jobs without dispatching
 Harbor again: Harbor otherwise rewrites job metadata even with no trials left.
 Every trial and the existing sealed output still pass normal import validation;
 changed evidence fails instead of replacing the earlier result.
+
+## Repair task quality
+
+Before a new repair campaign, follow [repair validation](repair-validation.md).
+Runtime admission alone is insufficient. Provide one current `--quality` receipt
+per task, binding valid/defective repair controls and an exact-checkout workflow
+probe. Historical Dojo oracles 3–5 are diagnostic-only for new admission.
