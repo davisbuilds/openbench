@@ -15,7 +15,7 @@ RUNTIME_ROOTS = ('obench.__main__', 'obench.cli', 'obench.runtime_admission', 'o
 DYNAMIC_FAMILIES = ('obench.adapters', 'obench.harbor_agents', 'obench.repair_oracles')
 
 
-def dependency_nodes(tree, *, cli=False):
+def dependency_nodes(tree, *, dispatches=()):
     """Prune only literal CLI dispatches that cannot handle a repair run.
 
     The entire CLI source is still hashed. New/unrecognized conditions and
@@ -23,7 +23,7 @@ def dependency_nodes(tree, *, cli=False):
     an ordinary dependency without binding it.
     """
     yield tree
-    if cli and isinstance(tree, ast.If):
+    if tree in dispatches and isinstance(tree, ast.If):
         test = tree.test
         if (isinstance(test, ast.Compare) and isinstance(test.left, ast.Name)
                 and test.left.id == 'command' and len(test.ops) == 1
@@ -32,10 +32,10 @@ def dependency_nodes(tree, *, cli=False):
                 and isinstance(test.comparators[0].value, str)
                 and test.comparators[0].value not in ('run', 'campaign', 'repair')):
             for node in [test, *tree.orelse]:
-                yield from dependency_nodes(node, cli=cli)
+                yield from dependency_nodes(node, dispatches=dispatches)
             return
     for child in ast.iter_child_nodes(tree):
-        yield from dependency_nodes(child, cli=cli)
+        yield from dependency_nodes(child, dispatches=dispatches)
 
 
 def runtime_sources(root, scripts):
@@ -62,7 +62,23 @@ def runtime_sources(root, scripts):
                 if prefix in modules:
                     result.add(prefix)
         tree = ast.parse(path.read_text(), filename=str(path))
-        for node in dependency_nodes(tree, cli=path == root/'obench/cli.py'):
+        dispatches = set()
+        if path == root/'obench/cli.py':
+            mains = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'main']
+            if len(mains) == 1:
+                main = mains[0]
+                assignments = [node for node in main.body if isinstance(node, ast.Assign)
+                               and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                               and node.targets[0].id == 'command']
+                writes = [node for node in ast.walk(main) if isinstance(node, ast.Name)
+                          and node.id == 'command' and isinstance(node.ctx, (ast.Store, ast.Del))]
+                expected = ast.dump(ast.parse('command = argv[0]').body[0])
+                if len(writes) == 1 and len(assignments) == 1 and ast.dump(assignments[0]) == expected:
+                    # Only direct branches in this one lexical scope may be
+                    # command dispatch. Helpers can have unrelated parameters
+                    # with the same name; their imports must remain visible.
+                    dispatches = {node for node in main.body if isinstance(node, ast.If)}
+        for node in dependency_nodes(tree, dispatches=dispatches):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     include(alias.name)

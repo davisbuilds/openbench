@@ -102,3 +102,31 @@ class EvidenceIdentityTests(unittest.TestCase):
         # A newly expressed routing condition is conservatively traversed.
         cli.write_text(original.replace('if command == "report":', 'if command in ("report", "run"):'))
         self.assertIn('obench/report.py', ra.implementation())
+
+    def test_nested_helper_command_branches_are_never_treated_as_cli_dispatch(self):
+        cli = self.root/'obench/cli.py'
+        original = cli.read_text()
+        helper = self.root/'obench/new_runtime_helper.py'
+        helper.write_text('VALUE = 1\n')
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                definition = ('def setup(command):\n'
+                              '    if command == "shared":\n'
+                              '        from obench import new_runtime_helper\n')
+                if nested:
+                    import textwrap
+                    source = original.replace('def main(argv=None):\n',
+                        'def main(argv=None):\n' + textwrap.indent(definition, '    ') + '    setup("shared")\n')
+                else:
+                    source = original + '\n' + definition
+                    source = source.replace('def main(argv=None):\n', 'def main(argv=None):\n    setup("shared")\n')
+                cli.write_text(source)
+                before = ra.implementation()
+                self.assertIn('obench/new_runtime_helper.py', before)
+                self.change('obench/new_runtime_helper.py')
+                self.assertNotEqual(ra.implementation(), before)
+
+    def test_reassigned_dispatch_variable_disables_branch_pruning(self):
+        cli = self.root/'obench/cli.py'
+        cli.write_text(cli.read_text().replace('    command = argv[0]', '    command = argv[0]\n    command = "report"'))
+        self.assertIn('obench/report.py', ra.implementation())
