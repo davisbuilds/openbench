@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from obench import repair_validation as rv
+from obench.repair_workflow import identity as workflow_identity
 from obench.repair_oracles import dojo_v6
 
 
@@ -132,7 +133,7 @@ class CLIContractsTests(unittest.TestCase):
                       'real_credentials': False, 'actual_tool_mutation': True, 'tool_result_returned': True,
                       'final_response_present': True, 'developer_workflows_passed': True,
                       'task': tmp, 'task_binding': info['task_binding'], 'runtime_image': 'sha256:'+'b'*64,
-                      'project_check': 'pnpm build', 'validation_sha256': rv.sha(Path(rv.__file__)), 'probe_sha256': rv.sha(rv.ROOT/'scripts/local/verify_repair_codex.py')}
+                      'project_check': 'pnpm build', 'workflow_sha256': workflow_identity(), 'probe_sha256': rv.sha(rv.ROOT/'scripts/local/verify_repair_codex.py')}
             files = ('agent/codex.txt', 'agent/developer-workflow.json', 'requests.jsonl', 'gateway.jsonl')
             for name in files:
                 p = root/name; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(name)
@@ -212,7 +213,7 @@ class ReceiptVerdictTests(unittest.TestCase):
             'final_response_present': True, 'developer_workflows_passed': True,
             'runtime_image': self.image, 'task': self.info['task'], 'task_binding': {},
             'project_check': 'true', 'probe_sha256': rv.sha(rv.ROOT/'scripts/local/verify_repair_codex.py'),
-            'validation_sha256': rv.sha(Path(rv.__file__)), 'evidence_sha256': evidence}))
+            'workflow_sha256': workflow_identity(), 'evidence_sha256': evidence}))
         # Isolate only task discovery and external Docker grading. Specification,
         # source/evidence files, hashing, control assessment and receipt parsing
         # use the production paths. Real Docker controls cover both task families.

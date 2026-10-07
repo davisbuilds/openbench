@@ -185,3 +185,30 @@ alter any oracle revision or historical score. The summary contains a
 check-by-control matrix and all seeded outcomes. CI retains only this synthetic
 summary, not harness transcripts. This coverage is a development test set, not
 an independent benchmark holdout or evidence of model difficulty.
+
+## Evidence invalidation scopes
+
+Workflow receipts now bind `repair_workflow.py` and the actual-harness probe,
+plus the exact task, image and command. Quality reporting or CLI edits alone no
+longer require another workflow run. Old receipts carrying only
+`validation_sha256` are intentionally stale; produce one fresh receipt under the
+new contract.
+
+Runtime qualification fingerprints follow local imports from execution entry
+points and qualification scripts, including the umbrella CLI, package initializers and literal
+registry/subprocess module names. The entire CLI is bound; only its literal
+non-repair dispatch branches are excluded from dependency traversal. New or
+unrecognized routing conditions are traversed conservatively. All adapter and oracle modules remain included
+because these also load dynamically. Runtime images, dependencies, control task
+bytes, context and model/effort identities retain their existing bindings.
+Standalone report/query edits no longer require expensive runtime qualification;
+adding a runtime import of such a module automatically binds it again. Parsing
+failures or missing entry points abort fingerprinting.
+
+This is a conservative module dependency closure, not a call graph. Shared
+modules and every built-in oracle still invalidate runtime evidence. A new
+computed dynamic loader must declare its entry-point family in
+`evidence_identity.py`; ordinary imports need no hand-maintained file list.
+Quality receipts retain their separate grader/policy identity and always undergo
+fresh replay. The identity-scope change requires one new runtime qualification;
+it does not migrate old evidence or exempt required execution controls.

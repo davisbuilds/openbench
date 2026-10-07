@@ -8,7 +8,6 @@ from contextlib import nullcontext
 import argparse
 import hashlib
 import json
-import shlex
 from pathlib import Path
 import sys
 import subprocess
@@ -18,13 +17,10 @@ import tomllib
 from . import repair_identity, sandbox_grading as legacy
 from .harbor_sandbox import read_tree, validate_image
 from .repair_oracles import registry
+from .repair_workflow import validate_workflow, workflow_command
 
 ROOT = Path(__file__).resolve().parents[1]
 
-
-def workflow_command(command):
-    """Keep an AND-list failure from being hidden by later probe commands."""
-    return 'bash --noprofile --norc -e -o pipefail -c ' + shlex.quote(command)
 
 
 def sha(path):
@@ -38,7 +34,7 @@ def fingerprint(value):
 def _implementation_hashes():
     # The report consumer and producer must agree, including source extraction.
     files = ['repair_validation.py', 'sandbox_grading.py', 'repair_grading.py',
-             'repair_worker.py', 'repair_identity.py', 'harbor_sandbox.py', 'repair_evidence.py']
+             'repair_worker.py', 'repair_identity.py', 'harbor_sandbox.py', 'repair_evidence.py', 'repair_workflow.py']
     files += [str(p.relative_to(ROOT / 'obench')) for p in (ROOT / 'obench/repair_oracles').glob('*.py')]
     return {name: sha(ROOT / 'obench' / name) for name in sorted(files)}
 
@@ -187,29 +183,6 @@ def assess_controls(records, info):
         findings.append('historical Dojo oracle is quarantined; use v6 with a reviewed case contract')
     return findings
 
-
-def validate_workflow(path, info, image, project_check):
-    value = json.loads(Path(path).read_text())
-    if not isinstance(value, dict):
-        raise ValueError('workflow receipt must be a JSON object')
-    required = {'status': 'passed', 'cleanup_confirmed': True, 'live_inference': False,
-                'real_credentials': False, 'actual_tool_mutation': True,
-                'tool_result_returned': True, 'final_response_present': True,
-                'developer_workflows_passed': True, 'runtime_image': image,
-                'task': info['task'], 'task_binding': info['task_binding'],
-                'project_check': project_check,
-                'probe_sha256': sha(ROOT / 'scripts/local/verify_repair_codex.py'),
-                'validation_sha256': sha(Path(__file__))}
-    if not project_check or any(type(value.get(k)) is not type(v) or value[k] != v for k, v in required.items()):
-        raise ValueError('workflow evidence is incomplete, stale, or belongs to another task/image/command')
-    required_files = {'agent/codex.txt', 'agent/developer-workflow.json', 'requests.jsonl', 'gateway.jsonl'}
-    if set(value.get('evidence_sha256', {})) != required_files:
-        raise ValueError('workflow receipt lacks bound execution evidence')
-    for name, digest in value['evidence_sha256'].items():
-        target = Path(path).parent / name
-        if target.is_symlink() or sha(target) != digest:
-            raise ValueError('workflow execution evidence changed')
-    return value
 
 
 def validate(task, controls, image, workflow, *, evidence=None):

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 ---
 
 # Repair validation before further model campaigns
@@ -89,3 +89,23 @@ must block admission; incomplete operations never authorize dispatch. Do not
 cache a successful quality verdict in place of production replay. No live model
 calls or refreshed authentication in this pass. Mini qualification and task-pool
 calibration follow separately.
+
+### Second-pass implementation state
+
+- Evidence/diagnostics: PR #27 retains actual admission observations and partial
+  operations. Review exposed exception-formatting hazards in both workers;
+  guarded fallbacks and real-container regressions preserve per-check behavior.
+- Docker CI/stability: PR #28 adds two fresh-worker control passes, edited-receipt
+  replay rejection, actual failed workflow rejection, interrupted evidence and
+  three fixed variation seeds. CI retains a synthetic coverage matrix.
+- Invalidation: isolate the workflow contract and fingerprint runtime import
+  dependencies conservatively, retaining all dynamically selected adapter and
+  oracle modules. Test relevant changes, irrelevant reporting changes, new
+  dependencies, initializers and loaded-code drift.
+
+Local Dojo synthetic admission replay took about 2.3 seconds for seven controls
+on the pinned runtime. This is a small fixture measurement, not a performance
+claim for full tasks or the Mini; it does not justify caching authoritative
+replays. Evidence is under ignored `results/repair-second-pass-20261007/`.
+Implementation is complete; PR review/CI delivery remains the merge gate.
+Then stop this pass. No model benchmarking has run.
