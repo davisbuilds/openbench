@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 ---
 
 # Repair validation before further model campaigns
@@ -63,6 +63,7 @@ The longer workflow exposed two diagnostic defects, fixed in this pass:
   completed command event. Runtime admission accepts the bounded wait requests.
 
 Offline evidence stays under ignored `results/repair-quality-20261007/`.
-Final delivery requires green repository checks and Codex PR review. Model
+Implementation is tracked in [PR #26](https://github.com/davisbuilds/openbench/pull/26).
+Delivery requires green repository checks and Codex PR review. Model
 campaigns remain on hold; new runtime authentication/boundary qualification and
 separately reviewed difficulty calibration follow this pass.
