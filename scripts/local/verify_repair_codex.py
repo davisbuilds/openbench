@@ -107,9 +107,9 @@ async def run(args):
                "runtime_image": image, "codex_version": CLI_VERSION,
                "model_alias": args.model, "model": model, "effort": effort,
                "probe_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
-    from obench.repair_validation import inspect_task, workflow_command
-    from obench import repair_validation
-    receipt['validation_sha256'] = hashlib.sha256(Path(repair_validation.__file__).read_bytes()).hexdigest()
+    from obench.repair_validation import inspect_task
+    from obench.repair_workflow import workflow_command, identity
+    receipt['workflow_sha256'] = identity()
     inspected = inspect_task(args.task)
     receipt.update(task=str(args.task.resolve()), task_binding=inspected['task_binding'])
     app = args.task / 'environment/app'

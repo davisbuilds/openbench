@@ -19,6 +19,7 @@ import tempfile
 
 from . import init, suite_run
 from .harbor_run import preflight_harbor_binary
+from .evidence_identity import runtime_sources
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKER = b'# OPENBENCH_RUNTIME_CONTROL_OK\n'
@@ -47,6 +48,19 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def implementation():
+    files = runtime_sources(ROOT, SCRIPTS)
+    files += [ROOT/p for p in SCRIPTS] + [ROOT/'docker/repair-sandbox/Dockerfile', ROOT/'obench/tests/test_sandbox_gateway.py']
+    files += list((ROOT/'docker/repair-sandbox/node').glob('*.json'))
+    for control_root in ('benchmarks/harbor/local/dojo-evidence-pr60-v5',
+                         'benchmarks/harbor/local/am-benchmark-pr106-v4',
+                         'benchmarks/local/am-benchmark-pr106-v2',
+                         'benchmarks/harbor/local/dojo-evidence-pr60-c3-o5',
+                         'benchmarks/harbor/local/am-benchmark-pr106-c2-o3'):
+        files += [p for p in (ROOT/control_root).rglob('*') if p.is_file() and '__pycache__' not in p.parts]
+    return {str(p.relative_to(ROOT)):digest(p) for p in sorted(files)}
+
+
 def fingerprint(compiled, harbor_binary):
     if compiled.suite.sandbox is None:
         raise AdmissionError('runtime admission currently supports repair-v1 suites')
@@ -56,20 +70,11 @@ def fingerprint(compiled, harbor_binary):
     suite_run._verify_sandbox_runtime(compiled, harbor, run_process=subprocess.run)
     image = json.loads(subprocess.check_output(['docker','image','inspect',compiled.suite.sandbox.runtime_image],text=True))[0]
     daemon = json.loads(subprocess.check_output(['docker','info','--format','{{json .}}'],text=True))
-    files = [p for p in (ROOT/'obench').rglob('*.py') if 'tests' not in p.relative_to(ROOT).parts]
-    files += [ROOT/p for p in SCRIPTS] + [ROOT/'docker/repair-sandbox/Dockerfile', ROOT/'obench/tests/test_sandbox_gateway.py']
-    files += list((ROOT/'docker/repair-sandbox/node').glob('*.json'))
-    for control_root in ('benchmarks/harbor/local/dojo-evidence-pr60-v5',
-                         'benchmarks/harbor/local/am-benchmark-pr106-v4',
-                         'benchmarks/local/am-benchmark-pr106-v2',
-                         'benchmarks/harbor/local/dojo-evidence-pr60-c3-o5',
-                         'benchmarks/harbor/local/am-benchmark-pr106-c2-o3'):
-        files += [p for p in (ROOT/control_root).rglob('*') if p.is_file() and '__pycache__' not in p.parts]
-    return {'schema':1, 'host':socket.gethostname(),
+    return {'schema':1, 'implementation_scope':'execution-import-closure-v1', 'host':socket.gethostname(),
             'image':{'id':image['Id'],'requested':compiled.suite.sandbox.runtime_image,'os':image['Os'],'architecture':image['Architecture']},
             'docker':{key:daemon.get(key) for key in ('ID','ServerVersion','OperatingSystem','Architecture')},
             'harbor':{'version':harbor.version,'commit':harbor.git_commit},
-            'implementation':{str(p.relative_to(ROOT)):digest(p) for p in sorted(files)},
+            'implementation':implementation(),
             'models':sorted({(arm.arm.model,arm.agent.model_name,arm.agent.kwargs['reasoning_effort']) for arm in compiled.arms}),
             'concurrency':1,
             **({'context_sha256':compiled.suite.sandbox.context_sha256}
