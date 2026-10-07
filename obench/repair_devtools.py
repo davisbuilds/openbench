@@ -43,6 +43,33 @@ def initialize_git(workspace: Path, git_dir: Path):
     git('commit', '--quiet', '--allow-empty', '-m', 'Supplied task baseline')
 
 
+def initialize_dependencies(workspace: Path):
+    """Writable local scaffolding, immutable offline packages; no install/hooks.
+
+    Package-local tmp directories must be writable. Linking the whole directory
+    to /opt makes ordinary packaging tests fail on the read-only image root.
+    This generated directory is not part of the submitted source or Git baseline.
+    """
+    if not (workspace / 'package.json').is_file():
+        return
+    target = workspace / 'node_modules'
+    if target.exists() or target.is_symlink():
+        raise ValueError('supplied node_modules is forbidden')
+    target.mkdir()
+    # Node resolves the pinned packages through the existing /node_modules
+    # ancestor. Keep /app/node_modules free of links so sealed workspace export
+    # retains its strict regular-file-only boundary.
+
+
+def initialize_workspace(workspace: Path, git_dir: Path):
+    initialize_git(workspace, git_dir)
+    exclude = git_dir / 'info/exclude'
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open('a') as f:
+        f.write('\n/node_modules/\n')
+    initialize_dependencies(workspace)
+
+
 def check():
     """Exercise tools offline as the solver, including compilers and tests."""
     commands = {
@@ -97,6 +124,14 @@ def check():
         run('make', cwd=app)
         run(str(app / 'probe'), cwd=app)
         run('bash', '-c', "jq -n -e '{ok:true}.ok'", cwd=app)
+        if run('bash', '-lc', 'printf "%s " {alpha,beta}').strip() != 'alpha beta':
+            raise RuntimeError('Bash brace expansion unavailable')
+        initialize_dependencies(app)
+        run('node', '-e', "const fs=require('fs'); const p=fs.mkdtempSync('node_modules/.tmp-cli-'); fs.rmSync(p,{recursive:true}); require('better-sqlite3')", cwd=app)
+        (app / 'input.css').write_text('@import "tailwindcss";\n@source inline("text-red-500");\n')
+        run('pnpm', 'exec', 'tailwindcss', '-i', 'input.css', '-o', 'output.css', cwd=app)
+        if '.text-red-500' not in (app / 'output.css').read_text():
+            raise RuntimeError('CSS build did not emit the requested class')
         run('ps', '-o', 'pid=', '-p', str(os.getpid()))
         scratch = app / 'scratch'
         scratch.mkdir()
@@ -112,7 +147,7 @@ def main():
     parser.add_argument('action', choices=('init', 'check'))
     args = parser.parse_args()
     if args.action == 'init':
-        initialize_git(Path('/app'), Path('/tmp/openbench-workspace.git'))
+        initialize_workspace(Path('/app'), Path('/tmp/openbench-workspace.git'))
     else:
         print(json.dumps(check(), sort_keys=True))
 

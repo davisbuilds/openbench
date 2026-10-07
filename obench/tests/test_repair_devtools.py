@@ -4,10 +4,23 @@ import subprocess
 import tempfile
 import unittest
 
-from obench.repair_devtools import initialize_git
+from obench.repair_devtools import initialize_git, initialize_workspace
 
 
 class WorkspaceGitTests(unittest.TestCase):
+    def test_actual_initialization_supports_writable_dependency_scratch_without_archive_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = root / 'app'
+            app.mkdir()
+            (app / 'package.json').write_text('{"name":"example"}')
+            initialize_workspace(app, root / 'history')
+            scratch = Path(tempfile.mkdtemp(prefix='.tmp-cli-', dir=app / 'node_modules'))
+            (scratch / 'package.json').write_text('{}')
+            self.assertFalse(any(p.is_symlink() for p in app.rglob('*')))
+            self.assertEqual(subprocess.check_output(['git', '-C', str(app), 'status', '--porcelain'], text=True), '')
+            self.assertEqual(subprocess.check_output(['git', '-C', str(app), 'rev-list', '--count', 'HEAD'], text=True).strip(), '1')
+
     def test_clean_baseline_diff_and_no_original_history(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -1,0 +1,154 @@
+"""Operator evidence contracts; candidate execution is covered by Docker controls."""
+import copy
+import contextlib
+import io
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+from obench import repair_validation as rv
+from obench.repair_oracles import dojo_v6
+
+
+class QualityControlsTests(unittest.TestCase):
+    def setUp(self):
+        self.info = {'checks': [{'id': 'migration', 'bucket': 'migration'},
+                                {'id': 'identity', 'bucket': 'identity'}],
+                     'buckets': ['migration', 'identity'], 'quality_eligible': True,
+                     'revision': {'oracle': 'agentmonitor-benchmark'}}
+        def record(name, role, failed):
+            return {'id': name, 'role': role, 'must_fail': failed,
+                    'result': {'source_sha256': {'source': name}, 'solved': not failed,
+                               'grading': {'score': 0 if failed else 1,
+                                           'checks': [{'id': c['id'], 'bucket': c['bucket'], 'pass': c['id'] not in failed}
+                                                      for c in self.info['checks']]}}}
+        self.records = [record('base', 'baseline', ['migration', 'identity']),
+                        record('reference', 'valid', []), record('alternative', 'valid', []),
+                        record('partial-migration', 'invalid', ['migration']),
+                        record('partial-identity', 'invalid', ['identity'])]
+
+    def test_accepts_declared_polarity_alternatives_and_targeted_defects(self):
+        self.assertEqual(rv.assess_controls(self.records, self.info), [])
+
+    def test_duplicate_alternatives_and_unrelated_failure_cannot_admit_task(self):
+        self.records[2]['result']['source_sha256'] = self.records[1]['result']['source_sha256']
+        self.assertTrue(any('duplicate' in s for s in rv.assess_controls(self.records, self.info)))
+        self.records[2]['result']['source_sha256'] = {'source': 'other'}
+        self.records[-1]['result']['grading']['checks'][1]['pass'] = True
+        self.records[-1]['result']['solved'] = True
+        self.records[-1]['result']['grading']['score'] = 1
+        self.assertTrue(any('escaped' in s for s in rv.assess_controls(self.records, self.info)))
+
+    def test_infra_or_invalid_artifact_is_not_a_successful_negative_control(self):
+        self.records[-1]['result']['grading']['candidate_failure'] = 'missing_source'
+        self.assertTrue(any('invalid candidate' in s for s in rv.assess_controls(self.records, self.info)))
+
+    def test_wholesale_failure_is_not_targeted_defect_evidence(self):
+        for check in self.records[-1]['result']['grading']['checks']:
+            check['pass'] = False
+        self.assertTrue(any('passing invariant' in s for s in rv.assess_controls(self.records, self.info)))
+
+    def test_malformed_observation_cannot_be_a_passing_reference(self):
+        self.records[1]['result']['grading']['checks'][0]['pass'] = 1
+        self.assertTrue(rv.assess_controls(self.records, self.info))
+
+    def test_reported_solved_flag_cannot_disagree_with_score(self):
+        self.records[1]['result']['grading']['score'] = 0
+        self.assertTrue(rv.assess_controls(self.records, self.info))
+
+    def test_no_references_and_missing_bucket_coverage_are_findings(self):
+        findings = rv.assess_controls([self.records[0], self.records[3]], self.info)
+        self.assertTrue(any('two distinct' in s for s in findings))
+        self.assertTrue(any('every scoring bucket' in s for s in findings))
+
+
+class DojoV6Tests(unittest.TestCase):
+    def test_named_contract_fixtures_use_realistic_paths_and_distinguish_sources(self):
+        cases = dojo_v6.cases()
+        self.assertEqual(len({c[0] for c in cases}), len(cases))
+        fixture = next(c for c in cases if c[0] == 'alias-version-equivalence')
+        self.assertIn('/1.0.0/skills/review/', fixture[2]['live'])
+        self.assertIsNone(fixture[3])
+        for name in ('different-skill-file', 'nonplugin-version-directory'):
+            self.assertIsInstance(next(c[3] for c in cases if c[0] == name), tuple)
+        self.assertNotIn('expected', json.dumps([c[2] for c in cases]))
+
+    def test_observed_expected_and_stable_id_survive_failure(self):
+        result = dojo_v6.grade([{'ok': False} for _ in dojo_v6.cases()])
+        self.assertEqual(result['score'], 0)
+        self.assertEqual(result['checks'][0], {'id': 'native-listing', 'bucket': 'rollout',
+                         'pass': False, 'observed': {'ok': False},
+                         'expected': {'names': ['actual'], 'surface': 'codex-tui'}})
+
+
+class CLIContractsTests(unittest.TestCase):
+    def test_failed_workflow_chain_cannot_be_hidden_by_later_probe_marker(self):
+        command = 'false && printf should-not-run'
+        result = subprocess.run(['bash', '-c', 'set -eu\n' + rv.workflow_command(command) + '\nprintf MARKER'],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('MARKER', result.stdout)
+
+    def test_help_is_discoverable_and_missing_task_is_incomplete_json(self):
+        help_result = subprocess.run([sys.executable, '-m', 'obench', 'repair', '--help'], capture_output=True, text=True)
+        self.assertEqual(help_result.returncode, 0, help_result.stderr)
+        self.assertIn('replay', help_result.stdout)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = rv.main(['inspect', '/nonexistent/openbench-task', '--json'])
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(out.getvalue())['status'], 'incomplete')
+
+    def test_output_refuses_overwrite_before_any_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / 'evidence.json'
+            p.write_text('original')
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = rv.main(['replay', tmp, '--source', tmp, '--image', 'sha256:' + 'a' * 64,
+                                '--output', str(p), '--json'])
+            self.assertEqual(code, 2)
+            self.assertEqual(p.read_text(), 'original')
+
+    def test_workflow_requires_exact_task_image_command_and_actual_tool_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / 'receipt.json'
+            p.write_text('[]')
+            with self.assertRaisesRegex(ValueError, 'object'):
+                rv.validate_workflow(p, {}, 'sha256:' + 'a'*64, 'pnpm build')
+            p.write_text(json.dumps({'status': 'passed', 'task': '/different-task'}))
+            with self.assertRaisesRegex(ValueError, 'incomplete'):
+                rv.validate_workflow(p, {'task': tmp, 'task_binding': {}}, 'sha256:' + 'a'*64, 'pnpm build')
+
+    def test_workflow_detects_changed_underlying_tool_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            info = {'task': tmp, 'task_binding': {'scheme': 3, 'sha256': 'a'*64}}
+            report = {'status': 'passed', 'cleanup_confirmed': True, 'live_inference': False,
+                      'real_credentials': False, 'actual_tool_mutation': True, 'tool_result_returned': True,
+                      'final_response_present': True, 'developer_workflows_passed': True,
+                      'task': tmp, 'task_binding': info['task_binding'], 'runtime_image': 'sha256:'+'b'*64,
+                      'project_check': 'pnpm build', 'validation_sha256': rv.sha(Path(rv.__file__)), 'probe_sha256': rv.sha(rv.ROOT/'scripts/local/verify_repair_codex.py')}
+            files = ('agent/codex.txt', 'agent/developer-workflow.json', 'requests.jsonl', 'gateway.jsonl')
+            for name in files:
+                p = root/name; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(name)
+            report['evidence_sha256'] = {name: rv.sha(root/name) for name in files}
+            receipt = root/'receipt.json'; receipt.write_text(json.dumps(report))
+            rv.validate_workflow(receipt, info, report['runtime_image'], 'pnpm build')
+            (root/'agent/codex.txt').write_text('changed')
+            with self.assertRaisesRegex(ValueError, 'evidence changed'):
+                rv.validate_workflow(receipt, info, report['runtime_image'], 'pnpm build')
+
+
+class ReceiptInputTests(unittest.TestCase):
+    def test_malformed_campaign_receipt_is_an_actionable_input_error(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt = Path(tmp)/'receipt.json'
+            for value in ({}, [], {'task': None}, {'task': {'task': 123}}):
+                receipt.write_text(json.dumps(value))
+                with self.assertRaisesRegex(ValueError, 'malformed'):
+                    rv.validate_campaign(SimpleNamespace(task_sets=[]), [receipt])

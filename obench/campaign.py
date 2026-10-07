@@ -118,7 +118,7 @@ def spawn_supervisor(directory, launch, command, env):
             raise CampaignError('tmux could not start the supervisor; launch receipt retained') from exc
 
 
-def launch_campaign(suite, *, harbor_binary='harbor', admission=None, qualify=False, auth_file=None):
+def launch_campaign(suite, *, harbor_binary='harbor', admission=None, quality=(), qualify=False, auth_file=None):
     if not shutil.which('tmux'):
         raise CampaignError('tmux is required for persistent campaign execution')
     source = git_identity()
@@ -131,6 +131,8 @@ def launch_campaign(suite, *, harbor_binary='harbor', admission=None, qualify=Fa
     if compiled.suite.sandbox and not qualify:
         if not admission:
             raise CampaignError('repair campaigns require --admission from a passing qualification')
+        from .repair_validation import validate_campaign
+        validate_campaign(compiled, quality)
         expected = runtime_admission.fingerprint(compiled, harbor_binary)
         runtime_admission.validate_admission(admission, expected)
         admission_hash = runtime_admission.digest(admission)
@@ -153,6 +155,7 @@ def launch_campaign(suite, *, harbor_binary='harbor', admission=None, qualify=Fa
               'manifest_sha256': compiled.manifest_sha256, 'mode': 'qualify' if qualify else 'run',
               'admission': str(Path(admission).resolve()) if admission else None,
               'admission_sha256': admission_hash,
+              'quality': {str(Path(p).resolve()): runtime_admission.digest(p) for p in quality},
               'auth_file': str(Path(auth_file).expanduser().absolute()) if qualify else None,
               'manifest': compiled.manifest, 'harbor_binary': str(Path(harbor).absolute()),
               'python': sys.executable, 'session': ('obench-qualify-' + qualification_key[:24]) if qualify else ('obench-' + compiled.manifest_sha256[:24]),
@@ -193,6 +196,11 @@ def execute(directory):
                     code, state = 0, 'qualified'
                 else:
                     if compiled.suite.sandbox:
+                        from .repair_validation import validate_campaign
+                        quality = launch.get('quality', {})
+                        if any(runtime_admission.digest(p) != digest for p, digest in quality.items()):
+                            raise CampaignError('quality evidence changed after launch')
+                        validate_campaign(compiled, quality)
                         admission = launch['admission']
                         if runtime_admission.digest(admission) != launch['admission_sha256']:
                             raise CampaignError('admission changed after launch')
@@ -288,6 +296,7 @@ def main(argv=None):
     launch.add_argument('suite')
     launch.add_argument('--harbor-binary', default='harbor')
     launch.add_argument('--admission', help='passing local runtime admission JSON for repair suites')
+    launch.add_argument('--quality', action='append', default=[], help='passing task quality JSON; repeat once per repair task')
     qualify_parser = sub.add_parser('qualify', help='run offline and authenticated controls in tmux')
     qualify_parser.add_argument('suite')
     qualify_parser.add_argument('--harbor-binary', default='harbor')
@@ -300,7 +309,7 @@ def main(argv=None):
     try:
         if args.command in ('launch', 'qualify'):
             directory = launch_campaign(args.suite, harbor_binary=args.harbor_binary,
-                                        admission=getattr(args,'admission',None), qualify=args.command=='qualify',
+                                        admission=getattr(args,'admission',None), quality=getattr(args,'quality',()), qualify=args.command=='qualify',
                                         auth_file=getattr(args,'auth_file',None))
             print(json.dumps({'directory': str(directory), 'status_command': ['obench','campaign','status',str(directory)]}))
         elif args.command == 'status':

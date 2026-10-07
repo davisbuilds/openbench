@@ -514,7 +514,7 @@ os.chown('/run/openbench-model', 0, 10001)
                     raise SandboxError('runtime developer tools differ from reviewed host module')
                 baseline = await self.exec('python3 -m obench.repair_devtools init')
                 if baseline.return_code != 0:
-                    raise SandboxError('cannot initialize the synthetic workspace Git baseline: ' + baseline.stderr)
+                    raise SandboxError('cannot initialize the synthetic workspace Git baseline: ' + (baseline.stderr or baseline.stdout or 'no command output'))
             except BaseException:
                 await self._cleanup()
                 raise

@@ -20,7 +20,7 @@ openbench_workspace_kind = "snapshot"
 
 [metadata.openbench_task_content_digest]
 scheme = 3
-sha256 = "78f0a885871092065f562f2af35eaba2724b1c8fb78e8f86429c0edda216f1b0"
+sha256 = "61abe55e4f584140b495cf66d54298f2f7dabf72b733a9a6e98e0a56baaed145"
 
 [metadata.openbench_harbor_export]
 schema_version = 1

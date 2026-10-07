@@ -110,6 +110,25 @@ class CampaignTests(unittest.TestCase):
             with self.assertRaisesRegex(campaign.CampaignError,'already has launch intent'):
                 campaign.launch_campaign(str(suite))
 
+    def test_repair_campaign_without_quality_evidence_never_reaches_runtime_or_dispatch(self):
+        from obench import runtime_admission
+        init.init_scaffold(self.root)
+        suite = self.root / '.openbench/suites/default.toml'
+        suite.write_text(suite.read_text().replace('gpt-5.6-sol', 'gpt-6-sol-high') +
+                         '\n[sandbox]\nkind="repair-v1"\nruntime_image="sha256:' + 'a'*64 + '"\n')
+        tasks = self.root / '.openbench/tasks'
+        shutil.rmtree(tasks)
+        source = campaign.ROOT / 'benchmarks/harbor/local/dojo-evidence-pr60-c3-o5'
+        shutil.copytree(source, tasks / source.name)
+        with patch.object(campaign, 'git_identity', return_value=self.launch['source']), \
+                patch.object(campaign.shutil, 'which', return_value=sys.executable), \
+                patch.object(runtime_admission, 'fingerprint') as fingerprint, \
+                patch.object(campaign, 'spawn_supervisor') as spawn:
+            with self.assertRaisesRegex(ValueError, 'every repair task'):
+                campaign.launch_campaign(suite, admission='does-not-exist.json')
+        fingerprint.assert_not_called()
+        spawn.assert_not_called()
+
     def test_worker_rejects_drift_before_executor(self):
         # Execute in a child because it intentionally redirects process stdout.
         path=self.directory/'launch.json'

@@ -117,7 +117,11 @@ def validate_model_controls(directory, expected, records, evidence=None):
                  'effort': record['effort'], 'runtime_image': expected['image']['requested'],
                  'codex_version': CLI_VERSION, 'probe_sha256': expected['implementation'][SCRIPTS[1]],
                  'actual_tool_mutation': True, 'tool_result_returned': True,
-                 'final_response_present': True, 'request_count': 2}
+                 'final_response_present': True}
+        # Long offline workflows can yield and require explicit wait requests.
+        count = receipt.get('request_count')
+        if type(count) is not int or not 2 <= count <= 8:
+            raise AdmissionError('model control has an incomplete execution treatment request count')
         exact['developer_workflows_passed'] = True
         if any(type(receipt.get(key)) is not type(value) or receipt.get(key) != value for key, value in exact.items()):
             raise AdmissionError('model control used another or incomplete execution treatment')
