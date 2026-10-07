@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from obench import repair_validation as rv
 from obench.repair_oracles import dojo_v6
@@ -144,6 +145,22 @@ class CLIContractsTests(unittest.TestCase):
 
 
 class ReceiptInputTests(unittest.TestCase):
+    def test_loaded_validation_cannot_be_relabelled_with_changed_disk_bytes(self):
+        # Read real files from a temporary copy; only relocate the source root.
+        import shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for relative in rv.implementation():
+                target = root/'obench'/relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(rv.ROOT/'obench'/relative, target)
+            with patch.object(rv, 'ROOT', root):
+                rv.implementation()
+                with (root/'obench/repair_validation.py').open('a') as f:
+                    f.write('\n# changed policy\n')
+                with self.assertRaisesRegex(ValueError, 'changed after import'):
+                    rv.implementation()
+
     def test_malformed_campaign_receipt_is_an_actionable_input_error(self):
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as tmp:

@@ -34,12 +34,22 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
-def implementation():
+def _implementation_hashes():
     # The report consumer and producer must agree, including source extraction.
     files = ['repair_validation.py', 'sandbox_grading.py', 'repair_grading.py',
              'repair_worker.py', 'repair_identity.py', 'harbor_sandbox.py']
     files += [str(p.relative_to(ROOT / 'obench')) for p in (ROOT / 'obench/repair_oracles').glob('*.py')]
     return {name: sha(ROOT / 'obench' / name) for name in sorted(files)}
+
+
+_LOADED_IMPLEMENTATION = _implementation_hashes()
+
+
+def implementation():
+    current = _implementation_hashes()
+    if current != _LOADED_IMPLEMENTATION:
+        raise ValueError('repair validation implementation changed after import')
+    return current
 
 
 def inspect_task(task):
