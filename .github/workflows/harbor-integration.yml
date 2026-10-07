@@ -57,6 +57,11 @@ jobs:
           .venv/bin/python scripts/local/verify_registered_repair.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/registered-oracle
+      - name: Check quality admission, forged receipts and grader stability
+        run: >-
+          .venv/bin/python scripts/ci/verify_repair_quality.py
+          --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
+          --output results/ci/repair-quality
       - name: Check registered oracle through Harbor lifecycle
         run: >-
           .venv/bin/python scripts/local/verify_registered_lifecycle.py
@@ -114,6 +119,14 @@ jobs:
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --task benchmarks/harbor/local/dojo-evidence-pr60-v4
           --output results/ci/log-export
+      - name: Retain synthetic quality coverage summary
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: repair-quality-summary
+          path: results/ci/repair-quality/summary.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Check sandbox cleanup
         if: always()
         run: |
