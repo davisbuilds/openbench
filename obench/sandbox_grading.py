@@ -68,14 +68,38 @@ def invoke(case):
         return rollout_codex.surface_mismatch(parse_block(case['live']),read(case['recorded']))
     raise ValueError('unknown operation')
 
+def diagnostic(get_value, limit, fallback):
+    try:
+        return str(get_value())[:limit]
+    except BaseException:
+        return fallback
+
 result = []
 for case in request['cases']:
     try:
         result.append({'ok':True,'value':invoke(case)})
-    except Exception:
-        result.append({'ok':False})
+    except Exception as exc:
+        result.append({'ok':False, 'error':{'type':diagnostic(lambda: type(exc).__name__, 128, 'Exception'),
+                      'message':diagnostic(lambda: str(exc), 1024, '<unprintable exception>'),
+                      'operation':diagnostic(lambda: case.get('op', 'unknown'), 128, 'unknown')}})
 sys.stdout.write(json.dumps({'schema':1,'results':result},allow_nan=False))
 '''
+
+
+def valid_worker_result(value):
+    """Error details are bounded untrusted observations, never grading authority."""
+    if not isinstance(value, dict) or type(value.get('ok')) is not bool:
+        return False
+    if value['ok']:
+        return set(value) == {'ok', 'value'}
+    if set(value) == {'ok'}:  # Historical workers remain replayable.
+        return True
+    if set(value) != {'ok', 'error'} or not isinstance(value['error'], dict):
+        return False
+    error = value['error']
+    limits = {'type': 128, 'message': 1024, 'operation': 128}
+    return (set(error) == set(limits) and
+            all(isinstance(error[k], str) and len(error[k]) <= limit for k, limit in limits.items()))
 
 
 class GradingError(ValueError):
@@ -311,7 +335,7 @@ def run_worker(image: str, archive: bytes, cases: list[dict], *, timeout=30) -> 
                 or len(result['results']) != len(cases)):
             raise CandidateFailure('invalid worker protocol')
         for value in result['results']:
-            if not isinstance(value,dict) or type(value.get('ok')) is not bool or set(value) != ({'ok','value'} if value['ok'] else {'ok'}):
+            if not valid_worker_result(value):
                 raise CandidateFailure('invalid worker result')
         return result['results'], {'image_id':image,'requested_image':requested_image,'network':'none','user':'10001:10001',
                                   'host_mounts':False,'read_only_root':True,'capabilities':'none'}

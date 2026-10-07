@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: in-progress
 ---
 
 # Repair validation before further model campaigns
@@ -67,3 +67,25 @@ Implementation is tracked in [PR #26](https://github.com/davisbuilds/openbench/p
 Delivery requires green repository checks and Codex PR review. Model
 campaigns remain on hold; new runtime authentication/boundary qualification and
 separately reviewed difficulty calibration follow this pass.
+
+## Second pass (approved)
+
+Model campaigns remain on hold during this bounded infrastructure pass.
+
+1. Persist fresh campaign admission replays, per-control timing and partial
+   evidence; expose a read-only structured operation status. Include bounded
+   worker failure diagnostics without changing scoring semantics.
+2. Exercise Dojo v6 quality admission in hosted Docker CI, including edited
+   failed receipts, failed workflows and interrupted evidence. Repeat controls
+   in fresh workers and report a check-by-defect coverage matrix. Add seeded
+   fixture variations only where their invariant is independently specified.
+3. Separate workflow evidence identity from quality/reporting implementation;
+   narrow runtime invalidation only with explicit dependency coverage and
+   relevant-change/irrelevant-change regression tests.
+
+Delivery: focused PRs, repository checks, offline Docker controls and Codex
+review. Preserve historical results and oracle semantics. Persistence failure
+must block admission; incomplete operations never authorize dispatch. Do not
+cache a successful quality verdict in place of production replay. No live model
+calls or refreshed authentication in this pass. Mini qualification and task-pool
+calibration follow separately.

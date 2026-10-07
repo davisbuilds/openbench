@@ -11,7 +11,7 @@ import subprocess
 import uuid
 
 from .sandbox_grading import (CandidateFailure, GradingError, _CommandFailure,
-                              bounded_command, source_archive)
+                              bounded_command, source_archive, valid_worker_result)
 
 
 def strict_json(raw):
@@ -84,7 +84,7 @@ def run_worker(image: str, archive: bytes, cases: list[dict], *, program: str, t
                 or len(result['results']) != len(cases)):
             raise CandidateFailure('invalid worker protocol')
         for value in result['results']:
-            if not isinstance(value,dict) or type(value.get('ok')) is not bool or set(value) != ({'ok','value'} if value['ok'] else {'ok'}):
+            if not valid_worker_result(value):
                 raise CandidateFailure('invalid worker result')
         return result['results'], {'image_id':image,'requested_image':requested_image,'network':'none','user':'10001:10001',
                                   'host_mounts':False,'read_only_root':True,'capabilities':'none'}

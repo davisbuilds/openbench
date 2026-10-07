@@ -266,3 +266,34 @@ class ReceiptVerdictTests(unittest.TestCase):
         self.assertEqual(rv.assess_controls(receipt['controls'], self.info), [])
         with self.assertRaisesRegex(ValueError, 'specification'):
             self.admit(receipt)
+
+    def test_campaign_persists_fresh_observations_and_only_then_passes(self):
+        from types import SimpleNamespace
+        from obench.repair_evidence import status
+        receipt = self.produce()
+        receipt['controls'][1]['result']['grading']['checks'][0]['observed'] = {'forged': True}
+        self.receipt.write_text(json.dumps(receipt))
+        self.results[str(self.root/'reference')]['grading']['checks'][0]['observed'] = {'fresh': True}
+        compiled = SimpleNamespace(task_sets=[SimpleNamespace(task_set=SimpleNamespace(path=self.root), task_names=['task'])],
+                                   suite=SimpleNamespace(sandbox=SimpleNamespace(runtime_image=self.image)))
+        directory = self.root/'operation'
+        rv.validate_campaign(compiled, [self.receipt], evidence_dir=directory)
+        evidence = status(directory)
+        self.assertEqual(evidence['status'], 'passed')
+        controls = [json.loads((directory/item['path']).read_text()) for item in evidence['evidence'] if item['kind'] == 'control']
+        self.assertEqual(controls[1]['result']['grading']['checks'][0]['observed'], {'fresh': True})
+
+    def test_receipt_disagreement_retains_replay_but_never_passes_operation(self):
+        from obench.repair_evidence import Operation, status
+        receipt = self.produce()
+        receipt['controls'][0]['must_fail'] = ['identity']
+        self.receipt.write_text(json.dumps(receipt))
+        directory = self.root/'operation'
+        with self.assertRaisesRegex(ValueError, 'specification'):
+            with Operation(directory, 'admission') as evidence:
+                result = rv.validate_receipt(self.receipt, self.info['task'], self.image, evidence=evidence)
+                evidence.finish(result)
+        report = status(directory)
+        self.assertEqual(report['status'], 'incomplete')
+        self.assertEqual(sum(item['kind'] == 'control' for item in report['evidence']), len(self.records))
+        self.assertTrue(any(item['kind'] == 'recomputed' for item in report['evidence']))

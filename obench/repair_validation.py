@@ -4,6 +4,7 @@ Candidate code is executed only by the production confined grader. Reports
 contain hidden evaluation evidence: keep them outside solver inputs and public
 results. A passing receipt proves its declared controls, not task completeness.
 """
+from contextlib import nullcontext
 import argparse
 import hashlib
 import json
@@ -37,7 +38,7 @@ def fingerprint(value):
 def _implementation_hashes():
     # The report consumer and producer must agree, including source extraction.
     files = ['repair_validation.py', 'sandbox_grading.py', 'repair_grading.py',
-             'repair_worker.py', 'repair_identity.py', 'harbor_sandbox.py']
+             'repair_worker.py', 'repair_identity.py', 'harbor_sandbox.py', 'repair_evidence.py']
     files += [str(p.relative_to(ROOT / 'obench')) for p in (ROOT / 'obench/repair_oracles').glob('*.py')]
     return {name: sha(ROOT / 'obench' / name) for name in sorted(files)}
 
@@ -211,7 +212,7 @@ def validate_workflow(path, info, image, project_check):
     return value
 
 
-def validate(task, controls, image, workflow):
+def validate(task, controls, image, workflow, *, evidence=None):
     info = inspect_task(task)
     controls = Path(controls).resolve()
     raw = controls.read_bytes()
@@ -221,7 +222,8 @@ def validate(task, controls, image, workflow):
             or not isinstance(spec['contract_review'], str) or not spec['contract_review'].strip()
             or not isinstance(spec['controls'], list) or not spec['controls']):
         raise ValueError('controls require schema=1, contract_review notes, project_check and a nonempty controls array')
-    validate_workflow(workflow, info, image, spec['project_check'])
+    with evidence.stage('workflow') if evidence else nullcontext():
+        validate_workflow(workflow, info, image, spec['project_check'])
     records, names = [], set()
     baseline = Path(task).resolve() / 'environment/app'
     for control in spec['controls']:
@@ -237,7 +239,11 @@ def validate(task, controls, image, workflow):
         source = (controls.parent / control['source']).resolve()
         if control['role'] == 'baseline' and source != baseline:
             raise ValueError('baseline must be the task environment/app, not a substitute')
-        records.append({**control, 'source': str(source), 'result': replay(task, source, image)})
+        with evidence.stage('control:' + control['id']) if evidence else nullcontext():
+            record = {**control, 'source': str(source), 'result': replay(task, source, image)}
+            if evidence:
+                evidence.artifact('control', record)
+            records.append(record)
     if controls.read_bytes() != raw:
         raise ValueError('control specification changed during validation')
     findings = assess_controls(records, info)
@@ -249,14 +255,14 @@ def validate(task, controls, image, workflow):
             'scope': 'declared repair controls only; workflow admission and difficulty calibration are separate'}
 
 
-def validate_receipt(path, task, image):
+def validate_receipt(path, task, image, *, evidence=None):
     try:
-        return _validate_receipt(path, task, image)
+        return _validate_receipt(path, task, image, evidence=evidence)
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError('malformed repair quality receipt') from exc
 
 
-def _validate_receipt(path, task, image):
+def _validate_receipt(path, task, image, *, evidence=None):
     value = json.loads(Path(path).read_text())
     info = inspect_task(task)
     if (value.get('schema') != 1 or value.get('kind') != 'repair-quality'
@@ -278,7 +284,9 @@ def _validate_receipt(path, task, image):
     # Hashing source bytes cannot authenticate claims about their behavior.
     # Reconstruct controls from the bound specification and use the production
     # confined grader again; saved pass/score fields never authorize dispatch.
-    fresh = validate(task, value['controls_path'], image, workflow['path'])
+    fresh = validate(task, value['controls_path'], image, workflow['path'], evidence=evidence)
+    if evidence:
+        evidence.artifact('recomputed', fresh)
     if fresh['status'] != 'passed':
         raise ValueError('recomputed quality controls failed: ' + '; '.join(fresh['findings']))
     if (fresh['controls_sha256'] != value['controls_sha256']
@@ -306,7 +314,17 @@ def _validate_receipt(path, task, image):
     return fresh
 
 
-def validate_campaign(compiled, paths):
+def validate_campaign(compiled, paths, *, evidence_dir=None):
+    if evidence_dir is not None:
+        from .repair_evidence import Operation
+        with Operation(evidence_dir, "campaign-admission") as evidence:
+            result = _validate_campaign(compiled, paths, evidence=evidence)
+            evidence.finish(result)
+            return result
+    return _validate_campaign(compiled, paths)
+
+
+def _validate_campaign(compiled, paths, *, evidence=None):
     tasks = [group.task_set.path / name for group in compiled.task_sets for name in group.task_names]
     by_task = {}
     for path in paths:
@@ -320,8 +338,12 @@ def validate_campaign(compiled, paths):
         by_task[task] = path
     if set(by_task) != {p.resolve() for p in tasks}:
         raise ValueError('every repair task requires exactly one --quality receipt from obench repair validate')
+    reports = []
     for task in tasks:
-        validate_receipt(by_task[task.resolve()], task, compiled.suite.sandbox.runtime_image)
+        with evidence.stage('task:' + str(task)) if evidence else nullcontext():
+            result = validate_receipt(by_task[task.resolve()], task, compiled.suite.sandbox.runtime_image, evidence=evidence)
+            reports.append(result)
+    return {'schema': 1, 'kind': 'repair-campaign-admission', 'status': 'passed', 'tasks': reports}
 
 
 def main(argv=None):
@@ -334,30 +356,46 @@ def main(argv=None):
         if action != 'inspect':
             p.add_argument('--image', required=True, help='immutable sha256 runtime identity')
             p.add_argument('--output', type=Path, help='create private JSON evidence; refuses overwrite')
+            p.add_argument('--evidence-dir', type=Path, help='fresh private operation directory; defaults to OUTPUT.evidence')
         if action == 'replay':
             p.add_argument('--source', type=Path, required=True, help='frozen source or checkout root')
         if action == 'validate':
             p.add_argument('--controls', type=Path, required=True, help='operator-only control specification JSON')
             p.add_argument('--workflow', type=Path, required=True, help='actual-harness offline workflow receipt for this task/image')
+    p = sub.add_parser('status', help='inspect a private operation, including interrupted attempts')
+    p.add_argument('directory', type=Path)
+    p.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
     try:
         if getattr(args, 'output', None) and args.output.exists():
             raise ValueError('output exists; choose a fresh evidence path')
-        if args.action == 'inspect':
-            result = inspect_task(args.task)
-        elif args.action == 'replay':
-            result = replay(args.task, args.source, args.image)
+        from .repair_evidence import Operation, status, write_json
+        def run(evidence=None):
+            if args.action == 'status':
+                return status(args.directory)
+            if args.action == 'inspect':
+                return inspect_task(args.task)
+            if args.action == 'replay':
+                with evidence.stage('replay') if evidence else nullcontext():
+                    return replay(args.task, args.source, args.image)
+            return validate(args.task, args.controls, args.image, args.workflow, evidence=evidence)
+        directory = getattr(args, 'evidence_dir', None)
+        if directory is None and getattr(args, 'output', None):
+            directory = Path(str(args.output) + '.evidence')
+        if directory:
+            with Operation(directory, args.action) as evidence:
+                result = run(evidence)
+                if getattr(args, 'output', None):
+                    write_json(args.output, result, exclusive=True)
+                evidence.finish(result)
         else:
-            result = validate(args.task, args.controls, args.image, args.workflow)
-        if getattr(args, 'output', None):
-            # Exclusive creation, private even if the caller uses a public umask.
-            import os
-            fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, 'w') as f:
-                json.dump(result, f, indent=2)
-                f.write('\n')
+            result = run()
         if args.json:
             print(json.dumps(result, sort_keys=True))
+        elif args.action == 'status':
+            print(f"{result['status']}: {result['directory']} ({len(result['evidence'])} artifacts)")
+            for blocker in result['blockers']:
+                print('  ' + json.dumps(blocker))
         elif args.action == 'inspect':
             print(f"{result['revision']}: {len(result['checks'])} checks; quality eligible={result['quality_eligible']}")
             for check in result['checks']:
@@ -374,10 +412,13 @@ def main(argv=None):
             for finding in result['findings']:
                 print('  ' + finding)
             print(result['scope'])
+        if result.get('status') in ('incomplete', 'interrupted', 'evidence_invalid', 'running'):
+            return 2
         return 1 if (result.get('status') == 'failed' or result.get('solved') is False) else 0
     except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         if args.json:
-            print(json.dumps({'schema': 1, 'status': 'incomplete', 'error': str(exc)}))
+            print(json.dumps({'schema': 1, 'status': 'incomplete', 'error': str(exc),
+                              'evidence_dir': str(directory) if 'directory' in locals() and directory else None}))
         else:
             print(f'repair validation incomplete: {exc}', file=sys.stderr)
         return 2
