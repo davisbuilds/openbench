@@ -22,6 +22,9 @@ CARD_JS = (JS.replace('button.textContent=r.title;',
     .replace("r.project+' · '+r.status", "r.project+' · '+r.status[0].toUpperCase()+r.status.slice(1)")
     .replace("detail.querySelector('.description').textContent=r.description;",
         "detail.querySelector('.description').replaceChildren(...r.description.split('\\n').map(line=>{const p=document.createElement('p');p.textContent=line;return p;}));"))
+CARD_JS = (CARD_JS.replace('search.oninput=render;status.onchange=render;',
+    'let timer;const update=()=>{clearTimeout(timer);timer=setTimeout(render,300);};search.oninput=update;status.onchange=update;')
+    .removesuffix('load();')+'setTimeout(load,200);')
 CARD_HTML = HTML.replace('<p class="description"></p>', '<div class="description"></div>')
 
 

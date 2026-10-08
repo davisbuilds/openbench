@@ -1,4 +1,4 @@
-"""Browser observations only. Expected outcomes and verdicts stay on the host.
+"""Browser observations only. Authoritative comparisons stay on the host.
 
 Candidate files are static assets, never imported as Node/Python modules. The
 browser retains Chromium's sandbox inside a confined network-free container.
@@ -11,6 +11,34 @@ const {chromium}=require('/opt/browser-deps/node_modules/playwright');
 const payload=JSON.parse(fs.readFileSync(0,'utf8'));
 const root='/tmp/submission/web';
 let current;
+async function visibleTitles(page,data) {
+ const records=[],handles=[];
+ try {
+  for(const item of data) {
+   const matches=await page.getByRole('button',{name:item.title,exact:true}).elementHandles();
+   handles.push(...matches);
+   for(const element of matches) if(await element.isVisible()) records.push({title:item.title,element});
+  }
+  // Preserve actual DOM order and duplicates, including metadata-bearing cards.
+  return await page.evaluate(records=>records.sort((a,b)=>
+   a.element.compareDocumentPosition(b.element)&Node.DOCUMENT_POSITION_FOLLOWING?-1:1
+  ).map(r=>r.title),records);
+ } finally {await Promise.all(handles.map(handle=>handle.dispose()));}
+}
+async function settleFilters(page,test) {
+ // A wait hint derived from public inputs, never a verdict. Read fresh browser
+ // observations afterward; the host independently checks their correctness.
+ const titles=test.data.filter(r=>
+  (r.title+' '+r.project).toLowerCase().includes((test.query||'').toLowerCase()) &&
+  (!test.status || r.status===test.status.toLowerCase())).map(r=>r.title);
+ const deadline=Date.now()+2000;
+ do {
+  const observed=await visibleTitles(page,test.data);
+  const empty=await page.getByText('No activities found',{exact:true}).isVisible();
+  if(JSON.stringify(observed)===JSON.stringify(titles) && empty===(titles.length===0))return;
+  await page.waitForTimeout(40);
+ } while(Date.now()<deadline);
+}
 const server=http.createServer((req,res)=>{
   let name;
   try { name=decodeURIComponent(new URL(req.url,'http://localhost').pathname); }
@@ -42,6 +70,7 @@ const results=[];
     await page.goto(origin,{waitUntil:'domcontentloaded'});
     let value={};
     if(test.mode==='loading') {
+      await page.getByText('Loading activities',{exact:true}).waitFor();
       value.loading=await page.getByText('Loading activities',{exact:true}).isVisible();
     }
     if(test.mode==='retry') {
@@ -52,6 +81,7 @@ const results=[];
     else await page.getByText('No activities found',{exact:true}).waitFor();
     if(test.query!==undefined) await page.getByLabel('Search activities',{exact:true}).fill(test.query);
     if(test.status) await page.getByRole('combobox',{name:'Status',exact:true}).selectOption({label:test.status});
+    if(test.query!==undefined || test.status) await settleFilters(page,test);
     if(test.mode==='detail') {
       await page.getByRole('button',{name:test.data[0].title,exact:true}).click();
       const detail=page.getByRole('region',{name:'Activity details',exact:true});
@@ -82,18 +112,7 @@ const results=[];
       await page.keyboard.press('Enter');
       value.detailOpened=await page.getByRole('region',{name:'Activity details',exact:true}).isVisible();
     }
-    const records=[];
-    for(const item of test.data) {
-      const button=page.getByRole('button',{name:item.title,exact:true});
-      for(const match of await button.all()) if(await match.isVisible()) {
-        records.push({title:item.title,element:await match.elementHandle()});
-      }
-    }
-    // Read actual DOM order, preserving duplicates instead of recreating the
-    // expected order by iterating the fixture. No prescribed DOM structure.
-    value.titles=await page.evaluate(records=>records.sort((a,b)=>
-      a.element.compareDocumentPosition(b.element)&Node.DOCUMENT_POSITION_FOLLOWING?-1:1
-    ).map(r=>r.title),records);
+    value.titles=await visibleTitles(page,test.data);
     value.empty=await page.getByText('No activities found',{exact:true}).isVisible();
     value.error=await page.getByText('Could not load activities',{exact:true}).isVisible();
     value.requests=current.requests;

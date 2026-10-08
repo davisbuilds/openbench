@@ -46,7 +46,7 @@ Implemented the task, pinned browser layer, closed browser-only seccomp profile,
 host-owned observation predicates, screenshot transport, and separate browser
 runtime admission. The normal repair-only execution profile is unchanged.
 
-Local real-container checks accept both list/card controls and reject nine
+Local real-container checks accept both list/card controls and reject eleven
 specific defects. Harbor accepts the valid submission, rejects a source symlink,
 and overwrites a forged reward with the trusted zero. The actual Codex loop
 renders a CSS change and delivers distinct before/after PNGs to the synthetic
@@ -58,7 +58,18 @@ capabilities and disabling the Chromium sandbox are not used. A candidate-free
 Chromium launch precedes every grade so a broken runtime cannot become a model
 failure. Worker receipts retain Chromium/Playwright versions and policy hash.
 
-Remaining delivery gates: fresh quality replay, full regression/hosted CI,
-Codex review, and exact-reviewed-commit qualification on the execution host.
+Cloud review identified two false-negative predicates: status/paragraph
+presentation and metadata inside accessible buttons. Both have red/green
+regressions and a strengthened card control. A further real-browser control
+reproduced premature loading/filter sampling; bounded observable-state waits
+now accept deferred initialization and debounced filtering. Missing visible
+titles and truncated descriptions remain rejected.
+
+Local validation passed 2,039 tests and fresh replay of fourteen browser
+controls before the asynchronous-wait correction. Runtime qualification also
+passed on the execution host, including all three model/effort controls and six
+completed HTTP-200 streams. Those earlier receipts remain diagnostic evidence;
+the correction requires renewed task seals, workflow/quality and runtime gates.
+Hosted Docker CI remains a required delivery gate.
 Keep screenshots/transcripts and machine-specific qualification paths local.
 The first task is not yet a calibrated difficulty benchmark.
