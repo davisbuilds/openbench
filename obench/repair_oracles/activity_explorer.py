@@ -1,4 +1,6 @@
 """Activity explorer v1: host-owned predicates over confined browser observations."""
+import re
+
 from ..browser_worker import program as worker_program
 
 
@@ -28,6 +30,14 @@ def cases():
     return [(name,bucket,{'mode':'list','data':rows,**args}) for name,bucket,args in definitions]
 
 
+def contains_text(text, expected, *, casefold=False):
+    """Compare complete displayed content without prescribing its formatting."""
+    if not isinstance(text,str): return False
+    text,expected=' '.join(text.split()),' '.join(expected.split())
+    if casefold: text,expected=text.casefold(),expected.casefold()
+    return bool(re.search(r'(?<!\w)'+re.escape(expected)+r'(?!\w)',text))
+
+
 def compare(name, value, request):
     expected=[r['title'] for r in request['data'] if
               request.get('query','').lower() in (r['title']+' '+r['project']).lower() and
@@ -38,14 +48,16 @@ def compare(name, value, request):
         return False
     if request['mode']=='detail':
         row=request['data'][0]
-        return value.get('closed') is True and value.get('detailReadable') is True and all(row[k] in value.get('detail','') for k in ('title','project','status','description'))
+        return (value.get('closed') is True and value.get('detailReadable') is True
+                and all(contains_text(value.get('detail'),row[k],casefold=k=='status')
+                        for k in ('title','project','status','description')))
     if name=='loading': return value.get('loading') is True
     if name=='retry': return value.get('requests')==2
     if request['mode']=='layout':
         items=value.get('items',[])
         return (value.get('documentWidth',10**6)<=request['viewport']['width']+1
                 and len(items)==len(expected) and all(
-                    item.get('text')==title and item.get('clipped') is False and item.get('nestedScroll') is False
+                    contains_text(item.get('text'),title) and item.get('clipped') is False and item.get('nestedScroll') is False
                     and item.get('hit') is True and item.get('fontSize',0)>=14
                     and item.get('box') and item['box']['width']>0 and item['box']['height']>=24
                     for item,title in zip(items,expected)))

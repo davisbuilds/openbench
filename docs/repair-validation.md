@@ -212,3 +212,18 @@ computed dynamic loader must declare its entry-point family in
 Quality receipts retain their separate grader/policy identity and always undergo
 fresh replay. The identity-scope change requires one new runtime qualification;
 it does not migrate old evidence or exempt required execution controls.
+
+## Activity explorer browser task
+
+The [activity explorer](../benchmarks/harbor/local/activity-explorer-c1-o1/README.md)
+uses the same fresh-replay gate with static `web/` submissions and browser
+observations. Its workflow receipt additionally binds before/after screenshots
+that the actual harness delivered to the test provider. Use the dedicated
+browser runtime and `verify_browser_quality.py --workflow ...` to generate the
+control specification, validate it and exercise fresh admission replay.
+
+Four equally weighted all-checks buckets report functionality, request states,
+keyboard navigation and responsive layout. Partial scores are bucket coverage;
+human design preference is separate. The candidate-free Chromium preflight
+classifies a broken browser installation as infrastructure failure. The public
+task README states the first oracle's coverage limits and uncalibrated difficulty.

@@ -33,5 +33,27 @@ class ActivityTests(unittest.TestCase):
         self.assertFalse(verify_options(['no-new-privileges','seccomp=unconfined']))
         self.assertFalse(verify_options(['no-new-privileges','seccomp='+POLICY.read_text(),'label=disable']))
 
+    def test_detail_allows_status_presentation_and_paragraph_spacing(self):
+        request=next(r for name,_,r in oracle.cases() if name=='detail')
+        row=request['data'][0]
+        value={'titles':[r['title'] for r in request['data']], 'empty':False,'error':False,
+               'closed':True,'detailReadable':True,
+               'detail':'\n\n'.join((row['title'],row['project'],row['status'].capitalize(),
+                                     row['description'].replace('\n','\n\n')))}
+        self.assertTrue(oracle.compare('detail',value,request))
+        for field in ('title','project','status','description'):
+            wrong=dict(value,detail='\n'.join(row[k] for k in ('title','project','status','description') if k!=field))
+            self.assertFalse(oracle.compare('detail',wrong,request),field)
+
+    def test_activity_button_can_include_visible_metadata(self):
+        request=next(r for name,_,r in oracle.cases() if name=='layout-360')
+        value={'titles':[r['title'] for r in request['data']],'empty':False,'error':False,'documentWidth':360,
+               'items':[{'text':r['title']+'\n'+r['project']+' · '+r['status'],
+                         'clipped':False,'nestedScroll':False,'hit':True,'fontSize':16,
+                         'box':{'width':300,'height':64}} for r in request['data']]}
+        self.assertTrue(oracle.compare('layout-360',value,request))
+        value['items'][0]['text']='Metadata only, missing the visible title'
+        self.assertFalse(oracle.compare('layout-360',value,request))
+
 
 if __name__=='__main__': unittest.main()

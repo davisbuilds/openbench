@@ -22,7 +22,9 @@ def main():
     args.output.mkdir(parents=True,exist_ok=False,mode=0o700)
     controls=prepare(args.output/'controls')
     targets={'broken-filter':'combined-filter','clipped-title':'layout-360','nested-scroll':'layout-360',
-             'hidden-text':'layout-360','broken-retry':'retry','broken-keyboard':'keyboard','wide-detail':'detail-mobile', 'reversed-list':'list', 'duplicate-record':'list'}
+             'hidden-text':'layout-360','broken-retry':'retry','broken-keyboard':'keyboard','wide-detail':'detail-mobile',
+             'reversed-list':'list', 'duplicate-record':'list', 'missing-visible-title':'layout-360',
+             'truncated-description':'detail'}
     summary=[]
     sources=[('baseline',ROOT/'benchmarks/harbor/local/activity-explorer-c1-o1/environment/app'),
              *[(p.name,p) for p in sorted(controls.iterdir())]]
@@ -45,10 +47,15 @@ def main():
             screenshot=check.get('observed',{}).get('value',{}).get('screenshot')
             if screenshot:
                 (args.output/(name+'-'+check['case']+'.png')).write_bytes(base64.b64decode(screenshot,validate=True))
-        assert not report.get('candidate_failure'), (name,report.get('candidate_failure'))
-        if name.startswith('valid-'): assert not failed,(name,failed)
-        elif name=='baseline': assert failed
-        else: assert targets[name] in failed and len(failed)<len(report['checks']),(name,failed)
+        if report.get('candidate_failure'):
+            raise RuntimeError(f"{name}: incomplete observations: {report['candidate_failure']}")
+        if name.startswith('valid-'):
+            accepted=not failed
+        elif name=='baseline':
+            accepted=bool(failed)
+        else:
+            accepted=targets[name] in failed and len(failed)<len(report['checks'])
+        if not accepted: raise RuntimeError(f'{name}: unexpected failed checks: {failed}')
         summary.append({'control':name,'score':report['score'],'failed':failed})
         print(json.dumps(summary[-1]),flush=True)
     if args.workflow:
