@@ -8,6 +8,8 @@ CLI configuration cannot select a destination. stdout contains metadata only.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 from dataclasses import asdict, dataclass, field
 import http.client
 import http.server
@@ -254,6 +256,25 @@ def _text_content(value):
     if not isinstance(value, list):
         raise ValueError("unsupported content")
     for item in value:
+        if isinstance(item, dict) and item.get('type') == 'input_image':
+            _keys(item, {'type', 'image_url', 'detail'}, {'type', 'image_url'})
+            url = item['image_url']
+            if not isinstance(url, str) or len(url) > 4 * 1024 * 1024:
+                raise ValueError('invalid or oversized inline image')
+            if item.get('detail', 'auto') not in ('auto', 'low', 'high', 'original'):
+                raise ValueError('unsupported image detail')
+            prefixes = {'data:image/png;base64,': b'\x89PNG\r\n\x1a\n',
+                        'data:image/jpeg;base64,': b'\xff\xd8\xff'}
+            prefix = next((p for p in prefixes if url.startswith(p)), None)
+            if prefix is None:
+                raise ValueError('only inline PNG/JPEG screenshots are permitted')
+            try:
+                raw = base64.b64decode(url[len(prefix):], validate=True)
+            except binascii.Error as exc:
+                raise ValueError('invalid image encoding') from exc
+            if not raw.startswith(prefixes[prefix]):
+                raise ValueError('image signature differs from declared type')
+            continue
         _keys(item, {"type", "text"}, {"type", "text"})
         if item["type"] not in {"input_text", "output_text"}:
             raise ValueError("only text content is permitted")

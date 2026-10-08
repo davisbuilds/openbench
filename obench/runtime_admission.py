@@ -38,6 +38,9 @@ SCRIPTS = (
 )
 
 CONTROLS = (*SCRIPTS, "runtime-sockets")
+BROWSER_SCRIPTS = ('scripts/local/verify_browser_quality.py',
+                   'scripts/ci/browser_quality_fixtures.py',
+                   'scripts/local/verify_browser_lifecycle.py')
 
 
 class AdmissionError(ValueError):
@@ -49,10 +52,14 @@ def digest(path):
 
 
 def implementation():
-    files = runtime_sources(ROOT, SCRIPTS)
+    files = runtime_sources(ROOT, (*SCRIPTS,*BROWSER_SCRIPTS))
+    files += [ROOT/p for p in BROWSER_SCRIPTS]
     files += [ROOT/p for p in SCRIPTS] + [ROOT/'docker/repair-sandbox/Dockerfile', ROOT/'obench/tests/test_sandbox_gateway.py']
     files += list((ROOT/'docker/repair-sandbox/node').glob('*.json'))
+    files += [p for p in (ROOT/'docker/browser-runtime').glob('*') if p.is_file()]
+    files += [ROOT/'obench/browser-seccomp.json']
     for control_root in ('benchmarks/harbor/local/dojo-evidence-pr60-v5',
+                         'benchmarks/harbor/local/activity-explorer-c1-o1',
                          'benchmarks/harbor/local/am-benchmark-pr106-v4',
                          'benchmarks/local/am-benchmark-pr106-v2',
                          'benchmarks/harbor/local/dojo-evidence-pr60-c3-o5',
@@ -70,7 +77,10 @@ def fingerprint(compiled, harbor_binary):
     suite_run._verify_sandbox_runtime(compiled, harbor, run_process=subprocess.run)
     image = json.loads(subprocess.check_output(['docker','image','inspect',compiled.suite.sandbox.runtime_image],text=True))[0]
     daemon = json.loads(subprocess.check_output(['docker','info','--format','{{json .}}'],text=True))
+    browser = any(item.get('repair_revision',{}).get('oracle')=='activity-explorer'
+                  for item in compiled.manifest['task_sets'])
     return {'schema':1, 'implementation_scope':'execution-import-closure-v1', 'host':socket.gethostname(),
+            **({'execution_profile':'browser-v1'} if browser else {}),
             'image':{'id':image['Id'],'requested':compiled.suite.sandbox.runtime_image,'os':image['Os'],'architecture':image['Architecture']},
             'docker':{key:daemon.get(key) for key in ('ID','ServerVersion','OperatingSystem','Architecture')},
             'harbor':{'version':harbor.version,'commit':harbor.git_commit},
@@ -128,6 +138,8 @@ def validate_model_controls(directory, expected, records, evidence=None):
         if type(count) is not int or not 2 <= count <= 8:
             raise AdmissionError('model control has an incomplete execution treatment request count')
         exact['developer_workflows_passed'] = True
+        if expected.get('execution_profile') == 'browser-v1':
+            exact['browser_image_received'] = True
         if any(type(receipt.get(key)) is not type(value) or receipt.get(key) != value for key, value in exact.items()):
             raise AdmissionError('model control used another or incomplete execution treatment')
         context_sha = expected.get('context_sha256')
@@ -176,6 +188,16 @@ def validate_admission(path, expected):
             or treatment['run']['concurrency'] != 1 or treatment['run']['timeout_seconds'] != 180):
         raise AdmissionError('authenticated control used another execution treatment')
     validate_model_controls(path.parent, expected, value.get('model_controls'), evidence)
+    if expected.get('execution_profile') == 'browser-v1':
+        for name in ('browser-quality.log','browser-quality/summary.json',
+                     'browser-lifecycle.log','browser-lifecycle/summary.json'):
+            if name not in evidence: raise AdmissionError('missing browser quality controls')
+        quality=json.loads((path.parent/'browser-quality/summary.json').read_text())
+        if quality.get('passed') is not True or quality.get('image') != expected['image']['requested']:
+            raise AdmissionError('browser controls used another runtime or did not pass')
+        lifecycle=json.loads((path.parent/'browser-lifecycle/summary.json').read_text())
+        if lifecycle.get('passed') is not True or lifecycle.get('runtime_image') != expected['image']['requested']:
+            raise AdmissionError('browser lifecycle controls used another runtime or did not pass')
     return value
 
 
@@ -183,6 +205,8 @@ def validate_admission(path, expected):
 def control_edit(task):
     import tomllib
     metadata=tomllib.loads((Path(task)/'task.toml').read_text()).get('metadata',{})
+    if metadata.get('openbench_oracle') == 'activity-explorer-v1':
+        return 'web/app.js', b'// OPENBENCH_RUNTIME_CONTROL_OK\n'
     if metadata.get('openbench_oracle') in ('agentmonitor-benchmark-v2', 'agentmonitor-benchmark-v3'):
         return 'src/db/schema.ts', b'// OPENBENCH_RUNTIME_CONTROL_OK\n'
     return CONTROL_TARGET, MARKER
@@ -212,7 +236,7 @@ def prepare_control(compiled, directory):
     from .sandbox_grading import task_digest as legacy_digest
     from .repair_oracles.registry import task_digest as registered_digest
     config = task/'task.toml'
-    digest_fn=registered_digest if target.startswith('src/') else legacy_digest
+    digest_fn=registered_digest if target.startswith(('src/','web/')) else legacy_digest
     text = re.sub(r'(\[metadata.openbench_task_content_digest\]\nscheme = [34]\nsha256 = ")[a-f0-9]{64}',
                   lambda m:m.group(1)+digest_fn(task),config.read_text())
     config.write_text(text)
@@ -294,6 +318,12 @@ def qualify(compiled, directory, harbor_binary, auth_file):
          '--user','10001:10001','-i',image,'python3','-','-v'],
     ]
     context_args = []
+    browser = before.get('execution_profile') == 'browser-v1'
+    if browser:
+        browser_task=ROOT/'benchmarks/harbor/local/activity-explorer-c1-o1'
+        commands[0][commands[0].index('--task')+1]=str(browser_task)
+        commands[1][commands[1].index('--task')+1]=str(browser_task)
+        commands[1] += ['--project-check','pnpm build']
     if compiled.suite.sandbox.context_archive:
         context_args = ['--context-archive', str(compiled.suite.sandbox.context_archive),
                         '--context-sha256', compiled.suite.sandbox.context_sha256]
@@ -307,9 +337,17 @@ def qualify(compiled, directory, harbor_binary, auth_file):
                 subprocess.run(command,cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
     for alias, record in list(model_records.items())[1:]:
         with (directory/record['log']).open('x') as log:
-            subprocess.run([python,SCRIPTS[1],'--runtime-image',image,'--task',str(task),
-                            '--model',alias,'--output-dir',str((directory/record['receipt']).parent), *context_args],
+            subprocess.run([python,SCRIPTS[1],'--runtime-image',image,'--task',str(browser_task if browser else task),
+                            '--model',alias,'--output-dir',str((directory/record['receipt']).parent), *context_args,
+                            *(['--project-check','pnpm build'] if browser else [])],
                            cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
+    if browser:
+        with (directory/'browser-quality.log').open('x') as log:
+            subprocess.run([python,'scripts/local/verify_browser_quality.py','--image',image,
+                            '--output',str(directory/'browser-quality')],cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
+        with (directory/'browser-lifecycle.log').open('x') as log:
+            subprocess.run([python,'scripts/local/verify_browser_lifecycle.py','--runtime-image',image,
+                            '--output',str(directory/'browser-lifecycle')],cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
     validate_model_controls(directory, before, model_records)
     if canonical(before) != canonical(fingerprint(compiled,harbor_binary)):
         raise AdmissionError('runtime changed during offline controls; authentication was not read')

@@ -46,7 +46,6 @@
     "docker/repair-sandbox/Dockerfile": "c080b92b1bce9efa00d2009ca527e96a1d5fe903ee817d0ad11bb63c3d7077f7",
     "experiments/candidates/deepagents-code.toml": "ad995fc938a0daac98126d4b748a085993136697fde88c7457e1fbbe5d4d5da1",
     "experiments/candidates/omp.toml": "5cc8300c9743a1247a4d1ae63d57e1fac55592b270f9f4f22e847dbbc85c8597",
-    "obench/harbor_sandbox.py": "ce775beae9f2ac0b1621b8c0ecec6d6d75b3ee5ffdb9a1dae5287c4a54e47b98",
     "obench/tests/test_gateway_probe_publish.py": "5495e378c36d0000b9c49550854588f05c955213e51c3c7fa14795058d1d71ad",
     "obench/tests/test_gateway_publish.py": "35dc2b83ddabf9a71e73848eb98bbae01465fd5f271ab3b326c6256302c929fb",
     "obench/tests/test_harbor_sandbox.py": "90ee1ed3bdefb7e16d41562069a9cb9fe6a3b6265e310f4c1ecaa7162bbc9f1b",

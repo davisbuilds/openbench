@@ -126,6 +126,38 @@ class RuntimeAdmissionTests(unittest.TestCase):
         with self.assertRaisesRegex(admission.AdmissionError, 'object'):
             admission.validate_model_controls(self.root, expected, records, evidence)
 
+    def test_browser_profile_requires_image_transport_for_every_model(self):
+        expected = {'execution_profile':'browser-v1', 'image':{'requested':'sha256:'+'a'*64},
+                    'implementation':{admission.SCRIPTS[1]:'c'*64},
+                    'models':[['gpt-6-sol-high','gpt-6-sol','high']]}
+        records=self.model_receipts(expected)
+        with self.assertRaisesRegex(admission.AdmissionError, 'execution treatment'):
+            admission.validate_model_controls(self.root,expected,records)
+        path=self.root/records['gpt-6-sol-high']['receipt']
+        receipt=json.loads(path.read_text())
+        receipt['browser_image_received']=True
+        write_record(path,receipt)
+        admission.validate_model_controls(self.root,expected,records)
+
+    def test_browser_task_changes_admission_profile_on_the_same_image(self):
+        from types import SimpleNamespace
+        sandbox=self.compiled.suite.sandbox
+        def fingerprint(compiled):
+            image={'Id':sandbox.runtime_image,'Os':'linux','Architecture':'arm64'}
+            with patch.object(admission,'preflight_harbor_binary',return_value=SimpleNamespace(version='test',git_commit='test')), \
+                 patch.object(suite_run,'_verify_sandbox_runtime'), \
+                 patch.object(admission.subprocess,'check_output',side_effect=[json.dumps([image]),'{}']):
+                return admission.fingerprint(compiled,'/test/harbor')
+        repair=fingerprint(self.compiled)
+        self.assertNotIn('execution_profile',repair)
+        tasks=self.root/'.openbench/tasks'
+        shutil.rmtree(tasks)
+        task=admission.ROOT/'benchmarks/harbor/local/activity-explorer-c1-o1'
+        shutil.copytree(task,tasks/task.name)
+        browser=fingerprint(suite_run.compile_suite(self.compiled.suite.path))
+        self.assertEqual(browser['execution_profile'],'browser-v1')
+        self.assertEqual(browser['image'],repair['image'])
+
     def test_qualification_dispatches_a_probe_for_every_selected_pair_before_auth(self):
         from types import SimpleNamespace
         expected = {'image':{'requested':self.compiled.suite.sandbox.runtime_image},

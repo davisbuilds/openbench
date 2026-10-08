@@ -17,6 +17,7 @@ LEGACY = {
     'am-benchmark-pr106-v4': ('am-benchmark-pr106', 1, 'agentmonitor-benchmark', 3),
 }
 CASE_ORACLES = {
+    'activity-explorer': ('activity-explorer', (1,)),
     'dojo-evidence-pr60': ('dojo-evidence', (3, 4, 5, 6)),
     'am-benchmark-pr106': ('agentmonitor-benchmark', (2, 3)),
 }

@@ -22,6 +22,21 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
+### Browser oracle coverage before expanding the task pool
+
+- **What**: The first activity-explorer oracle covers declared functional and
+  geometry checks, not comprehensive accessibility or adversarial page behavior.
+- **Evidence**: The list/card controls share their interaction code. Keyboard
+  controls currently cover search/status/record navigation and detail opening;
+  focus appearance and close/retry navigation still need human inspection.
+  Some geometry observations execute in the page's JavaScript world.
+- **Next**: Add an independently implemented modal/detail layout, explicit
+  close/retry/focus controls, and deliberate browser-observation tampering cases.
+  Move observation code into an isolated execution world if those cases show
+  influence from candidate JavaScript. Keep design preference separately scored.
+- **Revisit when**: Expanding beyond the initial calibration task or making
+  accessibility/adversarial-integrity claims.
+
 ### Repair benchmark calibration
 
 - **What**: Runtime isolation and passing repair controls do not establish

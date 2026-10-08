@@ -40,6 +40,10 @@ def validate_workflow(path, info, image, project_check):
     if not project_check or any(type(value.get(k)) is not type(v) or value[k] != v for k, v in required.items()):
         raise ValueError('workflow evidence is incomplete, stale, or belongs to another task/image/command')
     required_files = {'agent/codex.txt', 'agent/developer-workflow.json', 'requests.jsonl', 'gateway.jsonl'}
+    if info.get('revision', {}).get('oracle') == 'activity-explorer':
+        if value.get('browser_image_received') is not True:
+            raise ValueError('browser workflow lacks actual image transport')
+        required_files.update(('agent/browser-before.png','agent/browser.png'))
     if set(value.get('evidence_sha256', {})) != required_files:
         raise ValueError('workflow receipt lacks bound execution evidence')
     for name, digest in value['evidence_sha256'].items():

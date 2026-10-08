@@ -19,6 +19,8 @@ class Oracle:
 
 
 ORACLES = {
+    'activity-explorer-v1': Oracle('activity-explorer-v1',
+        'obench.repair_oracles.activity_explorer', 'web/', 'browser-observations-v1'),
     'agentmonitor-benchmark-v3': Oracle(
         'agentmonitor-benchmark-v3',
         'obench.repair_oracles.agentmonitor_v3', 'src/', 'am-benchmark-observations-v1'),
@@ -29,13 +31,16 @@ ORACLES = {
 MODULES = ('obench.sandbox_grading', 'obench.harbor_sandbox', 'obench.repair_worker', 'obench.repair_grading',
            'obench.repair_identity',
            'obench.repair_oracles.registry', 'obench.repair_oracles.agentmonitor',
-           'obench.repair_oracles.agentmonitor_v3')
+           'obench.repair_oracles.agentmonitor_v3', 'obench.browser_worker',
+           'obench.browser_policy', 'obench.repair_oracles.activity_explorer')
 PACKAGE = Path(__file__).resolve().parents[1]
 
 
 def implementation_hashes():
-    return {name: hashlib.sha256((PACKAGE / (name.removeprefix('obench.').replace('.', '/') + '.py')).read_bytes()).hexdigest()
+    hashes = {name: hashlib.sha256((PACKAGE / (name.removeprefix('obench.').replace('.', '/') + '.py')).read_bytes()).hexdigest()
             for name in MODULES}
+    hashes['obench/browser-seccomp.json'] = hashlib.sha256((PACKAGE / 'browser-seccomp.json').read_bytes()).hexdigest()
+    return hashes
 
 
 # Filled after all built-in modules exist; checked again before/after grading.

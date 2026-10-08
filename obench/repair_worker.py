@@ -32,7 +32,7 @@ def strict_json(raw):
     return json.loads(raw, object_pairs_hook=pairs, parse_float=number, parse_constant=constant)
 
 
-def run_worker(image: str, archive: bytes, cases: list[dict], *, program: str, timeout=30) -> tuple[list, dict]:
+def run_worker(image: str, archive: bytes, cases: list[dict], *, program: str, timeout=30, browser=False) -> tuple[list, dict]:
     requested_image = image
     if not re.fullmatch(r'(?:[A-Za-z0-9][A-Za-z0-9._:/-]*@)?sha256:[0-9a-f]{64}', image):
         raise GradingError('worker image must be pinned by digest or image ID')
@@ -46,12 +46,22 @@ def run_worker(image: str, archive: bytes, cases: list[dict], *, program: str, t
               '--pids-limit','64','--memory','512m','--cpus','1',
               '--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=67108864,mode=1777',
               '--workdir','/app','--interactive','--entrypoint','python3',image,'-I','-c',program]
+    if browser:
+        from .browser_policy import POLICY
+        create[create.index('--pids-limit') + 1] = '256'
+        create[create.index('--memory') + 1] = '2048m'
+        create[create.index('--tmpfs') + 1] = '/tmp:rw,nosuid,nodev,size=536870912,mode=1777'
+        create[2:2] = ['--security-opt', 'seccomp=' + str(POLICY), '--shm-size', '256m']
     created = False
     try:
         bounded_command(create)
         created = True
         inspected = json.loads(bounded_command(['docker','inspect',name]))[0]
         host = inspected['HostConfig']
+        if browser:
+            from .browser_policy import verify_options
+            if not verify_options(host.get('SecurityOpt')) or host.get('IpcMode') != 'private':
+                raise GradingError('browser worker sandbox policy drift')
         if (inspected['Image'] != image or inspected['Config']['User'] != '10001:10001'
                 or host['NetworkMode'] != 'none' or not host['ReadonlyRootfs']
                 or host.get('Binds') or inspected.get('Mounts')
@@ -60,7 +70,8 @@ def run_worker(image: str, archive: bytes, cases: list[dict], *, program: str, t
             raise GradingError('worker configuration drift')
         try:
             raw = bounded_command(['docker','start','--attach','--interactive',name],
-                                  input_bytes=json.dumps({'source':base64.b64encode(archive).decode(),'cases':cases}).encode(), timeout=timeout)
+                                  input_bytes=json.dumps({'source':base64.b64encode(archive).decode(),'cases':cases}).encode(), timeout=timeout,
+                                  **({'limit':8*1024*1024} if browser else {}))
         except _CommandFailure as exc:
             # A daemon/start failure is infrastructure. Only classify failures as
             # candidate-caused after Docker proves the worker actually started.
@@ -86,8 +97,12 @@ def run_worker(image: str, archive: bytes, cases: list[dict], *, program: str, t
         for value in result['results']:
             if not valid_worker_result(value):
                 raise CandidateFailure('invalid worker result')
-        return result['results'], {'image_id':image,'requested_image':requested_image,'network':'none','user':'10001:10001',
-                                  'host_mounts':False,'read_only_root':True,'capabilities':'none'}
+        evidence = {'image_id':image,'requested_image':requested_image,'network':'none','user':'10001:10001',
+                    'host_mounts':False,'read_only_root':True,'capabilities':'none'}
+        if browser:
+            from .browser_policy import identity
+            evidence['browser_policy_sha256'] = identity()
+        return result['results'], evidence
     finally:
         if created:
             cleaned = subprocess.run(['docker','rm','--force',name], capture_output=True, timeout=30)

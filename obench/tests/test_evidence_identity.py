@@ -15,7 +15,7 @@ class EvidenceIdentityTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         shutil.copytree(ra.ROOT/'obench', self.root/'obench', ignore=shutil.ignore_patterns('tests', '__pycache__'))
-        for relative in (*ra.SCRIPTS, 'docker/repair-sandbox/Dockerfile', 'obench/tests/test_sandbox_gateway.py'):
+        for relative in (*ra.SCRIPTS, *ra.BROWSER_SCRIPTS, 'docker/repair-sandbox/Dockerfile', 'obench/tests/test_sandbox_gateway.py'):
             path = self.root/relative
             path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ra.ROOT/relative, path)
