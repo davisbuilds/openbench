@@ -111,6 +111,10 @@ def prepare(root, *, adversarial=False):
             'tampered-order':(HTML,JS.replace('for(const r of filtered)', 'for(const r of filtered.reverse())')+POISON_ORDER,CSS),
             'tampered-description':(HTML,JS.replace('textContent=r.description','textContent=r.description.slice(0,30)')+POISON_TEXT,CSS),
             'tampered-keyboard':(HTML,JS.replace('button.onclick=()=>', 'button.tabIndex=-1;button.onkeydown=e=>e.preventDefault();button.onclick=()=>')+POISON_GLOBALS,CSS),
+            'invisible-body':(HTML,JS,CSS+'\nbody{opacity:0}'),
+            'invisible-html':(HTML,JS,CSS+'\nhtml{opacity:0}'),
+            'faded-ancestors':(HTML,JS,CSS+'\nhtml,body,main{opacity:.95}'),
+            'invisible-details':(HTML.replace('<section ', '<div style="opacity:0"><section ').replace('</section>', '</section></div>'),JS,CSS),
         })
     for name,(html,js,css) in variants.items():
         web=root/name/'web';web.mkdir(parents=True,exist_ok=False)

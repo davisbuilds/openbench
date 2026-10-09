@@ -145,7 +145,9 @@ const results=[];
         if(rect.left<0||rect.right>innerWidth+1||el.scrollWidth>el.clientWidth+2)return false;
         for(const p of [el,...el.querySelectorAll('*')]){
           const s=getComputedStyle(p);
-          if(Number(s.opacity)<0.9||s.visibility!=='visible'||s.color==='rgba(0, 0, 0, 0)'||s.color==='transparent')return false;
+          let opacity=1;
+          for(let ancestor=p;ancestor;ancestor=ancestor.parentElement)opacity*=Number(getComputedStyle(ancestor).opacity);
+          if(opacity<0.9||s.visibility!=='visible'||s.color==='rgba(0, 0, 0, 0)'||s.color==='transparent')return false;
           if(['hidden','clip'].includes(s.overflowY)&&p.scrollHeight>p.clientHeight+2)return false;
           if(['hidden','clip'].includes(s.overflowX)&&p.scrollWidth>p.clientWidth+2)return false;
         }
@@ -193,14 +195,17 @@ const results=[];
         const box=await observer.measure(node,el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};});
         const observation=await observer.measure(node,el=>{
           const style=getComputedStyle(el),rect=el.getBoundingClientRect();
-          let clipped=false,nestedScroll=false;
-          for(let p=el;p && p!==document.body && p!==document.documentElement;p=p.parentElement){
+          let clipped=false,nestedScroll=false,opacity=1;
+          for(let p=el;p;p=p.parentElement){
             const s=getComputedStyle(p),r=p.getBoundingClientRect();
-            if(['auto','scroll'].includes(s.overflowY) && p.scrollHeight>p.clientHeight+2) nestedScroll=true;
+            const documentRoot=p===document.body||p===document.documentElement;
+            opacity*=Number(s.opacity);
+            if(!documentRoot && ['auto','scroll'].includes(s.overflowY) && p.scrollHeight>p.clientHeight+2) nestedScroll=true;
             if(['hidden','clip'].includes(s.overflowX) && p.scrollWidth>p.clientWidth+2) clipped=true;
             if(['hidden','clip'].includes(s.overflowY) && p.scrollHeight>p.clientHeight+2) clipped=true;
-            if(Number(s.opacity)<0.9 || s.visibility!=='visible'||s.color==='rgba(0, 0, 0, 0)'||s.color==='transparent') clipped=true;
+            if(!documentRoot && (s.visibility!=='visible'||s.color==='rgba(0, 0, 0, 0)'||s.color==='transparent')) clipped=true;
           }
+          if(opacity<0.9)clipped=true;
           const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let node;
           while(node=walker.nextNode()){if(!node.textContent.trim())continue;const range=document.createRange();range.selectNodeContents(node);
             for(const r of range.getClientRects()) if(r.left<rect.left-2 || r.right>rect.right+2 || r.top<rect.top-2 || r.bottom>rect.bottom+2) clipped=true;}

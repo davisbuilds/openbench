@@ -34,14 +34,21 @@ def main():
              'hidden-text':'layout-360','broken-retry':'retry','broken-keyboard':'keyboard','wide-detail':'detail-mobile',
              'reversed-list':'list', 'duplicate-record':'list', 'missing-visible-title':'layout-360',
              'truncated-description':'detail', 'tampered-clipping':'layout-360',
-             'tampered-order':'list', 'tampered-description':'detail', 'tampered-keyboard':'keyboard'}
+             'tampered-order':'list', 'tampered-description':'detail', 'tampered-keyboard':'keyboard',
+             'invisible-body':['layout-360','detail','detail-mobile'],
+             'invisible-html':['layout-360','detail','detail-mobile'],
+             'faded-ancestors':['layout-360','detail','detail-mobile'],
+             'invisible-details':['detail','detail-mobile']}
+    def must_fail(name):
+        value=targets.get(name,'search')
+        return [value] if isinstance(value,str) else value
     summary=[]
     sources=[('baseline',ROOT/'benchmarks/harbor/local/activity-explorer-c2-o2/environment/app'),
              *[(p.name,p) for p in sorted(controls.iterdir())]]
     specification={'schema':1,'contract_review':'Synthetic activity explorer: static assets, semantic interactions, responsive content and keyboard access; preference unscored.',
                    'project_check':'pnpm build','controls':[
                        {'id':name,'role':'baseline' if name=='baseline' else 'valid' if name.startswith('valid-') else 'invalid',
-                        'source':str(source.resolve()),'must_fail':[] if name.startswith('valid-') else [targets.get(name,'search')]}
+                        'source':str(source.resolve()),'must_fail':[] if name.startswith('valid-') else must_fail(name)}
                        for name,source in sources]}
     spec_path=args.output/'controls.json'
     spec_path.write_text(json.dumps(specification,indent=2)+'\n')
@@ -79,7 +86,7 @@ def main():
         elif name=='baseline':
             accepted=bool(failed)
         else:
-            accepted=targets[name] in failed and len(failed)<len(report['checks'])
+            accepted=set(must_fail(name))<=set(failed) and len(failed)<len(report['checks'])
         if not accepted: raise RuntimeError(f'{name}: unexpected failed checks: {failed}')
         summary.append({'control':name,'score':report['score'],'failed':failed})
         print(json.dumps(summary[-1]),flush=True)
