@@ -140,7 +140,7 @@ explorer browser lanes with one or two concurrent trials. Browser tasks select a
 admission profile on the same immutable image: sandboxed Chromium, actual
 before/after image transport for each model, browser quality controls and Harbor
 lifecycle/import checks are mandatory. A repair-only receipt is insufficient.
-See the [activity explorer contract and controls](../benchmarks/harbor/local/activity-explorer-c1-o1/README.md). The authenticated control uses the selected task’s verifier
+See the [activity explorer contract and controls](../benchmarks/harbor/local/activity-explorer-c2-o2/README.md). The authenticated control uses the selected task’s verifier
 with a separate file-edit instruction and task digest. `obench run` remains the low-level canonical execution/control
 entry point; the campaign wrapper enforces the unattended launch policy. API-key
 environment variables are not forwarded through tmux. File-based OAuth and local

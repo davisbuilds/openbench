@@ -21,7 +21,7 @@ links, unexpected assets and oversized submissions, and copies the assets into
 a private bundle. It checks source hashes against the supplied grading receipts;
 **this is not independent verification of the entire suite**. Verify the sealed
 suite separately before making benchmark claims. The current task adapter is
-`activity-explorer-v1`; other app protocols are not implicitly supported.
+`activity-explorer-v1` or `activity-explorer-v2`; other app protocols are not implicitly supported.
 
 Use the pinned [browser runtime](../docker/browser-runtime/README.md). Run
 `serve` in a named tmux session for a persistent review. It stays in the

@@ -82,8 +82,8 @@ def prepare(trials, output, *, keep_order=False):
     for i, trial in enumerate(entries):
         receipt_bytes = (trial / 'verifier/sandbox-grading.json').read_bytes()
         receipt = json.loads(receipt_bytes)['grading']
-        if receipt.get('oracle_id') != 'activity-explorer-v1':
-            raise ValueError('review currently supports activity-explorer-v1 artifacts')
+        if receipt.get('oracle_id') not in ('activity-explorer-v1', 'activity-explorer-v2'):
+            raise ValueError('review supports activity-explorer-v1/v2 artifacts')
         expected = receipt.get('source_sha256')
         if not isinstance(expected, dict) or not expected or any(not k.startswith('web/') for k in expected):
             raise ValueError('missing browser source hashes')

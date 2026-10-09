@@ -17,7 +17,7 @@ from harbor.models.trial.config import TrialConfig
 from harbor.trial.trial import Trial
 from obench.harbor_results import _validate_artifacts,_validate_sandbox_receipt
 
-ORACLE='activity-explorer-v1'
+ORACLE='activity-explorer-v2'
 
 
 class FixtureAgent(DojoFixture):
@@ -56,7 +56,7 @@ async def main():
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     output=args.output.resolve();output.mkdir(parents=True,exist_ok=False)
-    task=ROOT/'benchmarks/harbor/local/activity-explorer-c1-o1'
+    task=ROOT/'benchmarks/harbor/local/activity-explorer-c2-o2'
     controls=prepare(output/'controls')
     records=[]
     for mode,expected in [('reference',1),('malformed',0),('forged-reward',0)]:

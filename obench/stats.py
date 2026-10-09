@@ -1180,6 +1180,14 @@ def _validate_suite_sandbox_policy(manifest):
                                 'obench.repair_oracles.activity_explorer'} for modules in accepted
                       if 'obench.repair_oracles.agentmonitor_v3' in modules
                       and 'obench.frozen_context' in modules)
+    browser_v2 = {'obench.browser_worker_v2', 'obench.repair_oracles.activity_explorer_v2'}
+    accepted += tuple(modules | browser_v2 for modules in accepted
+                      if 'obench.repair_oracles.activity_explorer' in modules)
+    for task_set in manifest.get('task_sets', []):
+        revision = task_set.get('repair_revision') or {}
+        if (revision.get('oracle') == 'activity-explorer' and revision.get('oracle_revision') == 2
+                and (not isinstance(hashes, dict) or not browser_v2 <= hashes.keys())):
+            raise ValueError('suite browser v2 observer implementation is not sealed')
     if 'context_sha256' in policy and (not isinstance(hashes, dict) or 'obench.frozen_context' not in hashes):
         raise ValueError('suite context implementation is not sealed')
     if (not isinstance(hashes, dict) or set(hashes) not in accepted

@@ -111,7 +111,9 @@ class AgentMonitorOracleTests(unittest.TestCase):
 class RegisteredSuiteTests(unittest.TestCase):
     def test_registered_task_compiles_into_locked_oracle_and_isolated_plugins(self):
         for task, oracle in (('am-benchmark-pr106-v3', 'agentmonitor-benchmark-v2'),
-                             ('am-benchmark-pr106-v4', 'agentmonitor-benchmark-v3')):
+                             ('am-benchmark-pr106-v4', 'agentmonitor-benchmark-v3'),
+                             ('activity-explorer-c1-o1', 'activity-explorer-v1'),
+                             ('activity-explorer-c2-o2', 'activity-explorer-v2')):
             with self.subTest(task=task):
                 self.check_registered_task(task, oracle)
 
@@ -131,6 +133,13 @@ class RegisteredSuiteTests(unittest.TestCase):
             self.assertEqual(job['environment']['kwargs']['oracle_id'],oracle)
             from obench.stats import _validate_suite_sandbox_policy
             _validate_suite_sandbox_policy(compiled.manifest)
+            if oracle == 'activity-explorer-v2':
+                import copy
+                tampered = copy.deepcopy(compiled.manifest)
+                tampered['sandbox']['implementation_sha256'].pop('obench.browser_worker_v2')
+                tampered['sandbox']['implementation_sha256'].pop('obench.repair_oracles.activity_explorer_v2')
+                with self.assertRaisesRegex(ValueError, 'browser v2 observer'):
+                    _validate_suite_sandbox_policy(tampered)
             self.assertEqual(job['verifier']['import_path'],'obench.repair_grading:RepairVerifier')
             self.assertIn('obench.repair_oracles.agentmonitor',compiled.manifest['sandbox']['implementation_sha256'])
             from obench import runtime_admission

@@ -161,7 +161,7 @@ class RuntimeAdmissionTests(unittest.TestCase):
         self.assertNotIn('execution_profile',repair)
         tasks=self.root/'.openbench/tasks'
         shutil.rmtree(tasks)
-        task=admission.ROOT/'benchmarks/harbor/local/activity-explorer-c1-o1'
+        task=admission.ROOT/'benchmarks/harbor/local/activity-explorer-c2-o2'
         shutil.copytree(task,tasks/task.name)
         browser=fingerprint(suite_run.compile_suite(self.compiled.suite.path))
         self.assertEqual(browser['execution_profile'],'browser-v1')

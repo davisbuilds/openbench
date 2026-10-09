@@ -74,6 +74,27 @@ class SandboxReceiptTests(unittest.TestCase):
         self.receipt['grading']['protocol']='another-protocol'
         with self.assertRaisesRegex(ValueError,'oracle differs'):check()
 
+    def test_browser_v2_requires_isolated_observer_runtime_evidence(self):
+        from obench.browser_policy import identity
+        for oracle in ('activity-explorer-v1', 'activity-explorer-v2'):
+            protocol = 'browser-observations-v1'
+            self.binding.update(scheme=4, oracle={'id':oracle,'protocol':protocol})
+            self.digest = {'scheme':4,'sha256':hashlib.sha256(json.dumps(
+                self.binding,sort_keys=True,separators=(',',':')).encode()).hexdigest()}
+            self.receipt['grading'].update(oracle_id=oracle,protocol=protocol)
+            runtime = {'sandbox':True,'playwright':'1.64.0','chromium':'pinned',
+                       'observer':'cdp-isolated-world-v2','isolated_world':True}
+            self.receipt['grading']['worker'].update(browser_policy_sha256=identity(),runtime_dependencies=runtime)
+            def check():
+                (self.verifier/'sandbox-grading.json').write_text(json.dumps(self.receipt))
+                return _validate_sandbox_receipt(self.root,self.digest,1,'test',expected_oracle=oracle)
+            check()
+            runtime.pop('isolated_world')
+            if oracle.endswith('v2'):
+                with self.assertRaisesRegex(ValueError,'isolated browser observer'):check()
+            else:
+                check()  # Historical evidence is still readable.
+
 
 class StagedAuthTests(unittest.TestCase):
     def test_private_staging_allows_repeat_return_but_rejects_links(self):

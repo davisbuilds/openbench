@@ -74,7 +74,8 @@ def inspect_task(task):
             'task_binding': metadata['openbench_task_content_digest'],
             'revision': repair_identity.record(manifest), 'source_prefix': prefix,
             'checks': checks, 'buckets': sorted({c['bucket'] for c in checks}),
-            'quality_eligible': revision['oracle'] != 'dojo-evidence' or revision['oracle_revision'] >= 6,
+            'quality_eligible': not ((revision['oracle'] == 'dojo-evidence' and revision['oracle_revision'] < 6)
+                                     or (revision['oracle'] == 'activity-explorer' and revision['oracle_revision'] < 2)),
             'limitations': ['controls do not establish complete specification coverage or calibrated difficulty'],
             'next': 'obench repair validate TASK --controls CONTROLS.json --workflow WORKFLOW.json --image sha256:... --output RECEIPT.json'}
 
@@ -180,7 +181,9 @@ def assess_controls(records, info):
         if not required <= killed:
             findings.append('Dojo requires source-identity boundary defect controls')
     if not info['quality_eligible']:
-        findings.append('historical Dojo oracle is quarantined; use v6 with a reviewed case contract')
+        findings.append('historical Dojo oracle is quarantined; use v6 with a reviewed case contract'
+                        if info['revision']['oracle'] == 'dojo-evidence' else
+                        'historical browser oracle is quarantined; use activity-explorer-c2-o2 with protected observations')
     return findings
 
 

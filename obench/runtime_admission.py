@@ -61,7 +61,7 @@ def implementation():
     files += [p for p in (ROOT/'docker/browser-runtime').glob('*') if p.is_file()]
     files += [ROOT/'obench/browser-seccomp.json']
     for control_root in ('benchmarks/harbor/local/dojo-evidence-pr60-v5',
-                         'benchmarks/harbor/local/activity-explorer-c1-o1',
+                         'benchmarks/harbor/local/activity-explorer-c2-o2',
                          'benchmarks/harbor/local/am-benchmark-pr106-v4',
                          'benchmarks/local/am-benchmark-pr106-v2',
                          'benchmarks/harbor/local/dojo-evidence-pr60-c3-o5',
@@ -215,7 +215,7 @@ def validate_admission(path, expected):
 def control_edit(task):
     import tomllib
     metadata=tomllib.loads((Path(task)/'task.toml').read_text()).get('metadata',{})
-    if metadata.get('openbench_oracle') == 'activity-explorer-v1':
+    if metadata.get('openbench_oracle') in ('activity-explorer-v1', 'activity-explorer-v2'):
         return 'web/app.js', b'// OPENBENCH_RUNTIME_CONTROL_OK\n'
     if metadata.get('openbench_oracle') in ('agentmonitor-benchmark-v2', 'agentmonitor-benchmark-v3'):
         return 'src/db/schema.ts', b'// OPENBENCH_RUNTIME_CONTROL_OK\n'
@@ -360,7 +360,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     context_args = []
     browser = before.get('execution_profile') == 'browser-v1'
     if browser:
-        browser_task=ROOT/'benchmarks/harbor/local/activity-explorer-c1-o1'
+        browser_task=ROOT/'benchmarks/harbor/local/activity-explorer-c2-o2'
         commands[0][commands[0].index('--task')+1]=str(browser_task)
         commands[1][commands[1].index('--task')+1]=str(browser_task)
         commands[1] += ['--project-check','pnpm build']

@@ -215,7 +215,7 @@ it does not migrate old evidence or exempt required execution controls.
 
 ## Activity explorer browser task
 
-The [activity explorer](../benchmarks/harbor/local/activity-explorer-c1-o1/README.md)
+The [activity explorer v2](../benchmarks/harbor/local/activity-explorer-c2-o2/README.md)
 uses the same fresh-replay gate with static `web/` submissions and browser
 observations. Its workflow receipt additionally binds before/after screenshots
 that the actual harness delivered to the test provider. Use the dedicated
@@ -226,4 +226,21 @@ Four equally weighted all-checks buckets report functionality, request states,
 keyboard navigation and responsive layout. Partial scores are bucket coverage;
 human design preference is separate. The candidate-free Chromium preflight
 classifies a broken browser installation as infrastructure failure. The public
-task README states the first oracle's coverage limits and uncalibrated difficulty.
+task README states the oracle's coverage limits and uncalibrated difficulty.
+
+V2 resolves browser-owned accessibility nodes and reads geometry, text, order
+and focus in an isolated execution world. Page-world DOM overrides cannot
+replace those measurement functions. CI demonstrates an active v1 clipping
+bypass and its rejection under v2, alongside valid list/card/modal controls,
+cosmetic capitalization, and deliberate order/content/focus spoofing. Destroying
+the observer context fails closed. This does not establish resistance to every
+browser exploit, test-aware application, or prior knowledge of public fixtures.
+
+V2 accepts a labeled region or dialog for details and verifies keyboard closing.
+The four bucket weights stay unchanged; `check_pass_fraction`, `failure_reasons`
+and `failure_groups` explain misses without claiming a percentage implemented.
+V1 remains available for historical replay but is quarantined from task-quality
+admission. Replaying a saved UI under v2 produces separate diagnostic evidence;
+it does not overwrite its original score or constitute a new model attempt.
+Private scored holdout packaging remains a separate decision. Public synthetic
+calibration tasks cannot be treated as secret evaluations.
