@@ -34,6 +34,9 @@ changes.
 
 The integration lane does not establish model accuracy or authenticated provider
 connectivity. Hosted Linux coverage complements local Docker-on-macOS checks.
+The browser lane also tests frozen evaluation-package replay and solver export
+boundaries with synthetic public fixtures. It neither accesses private scored
+packages nor grants their campaign admission.
 
 ## Workflow baseline
 

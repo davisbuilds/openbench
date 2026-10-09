@@ -66,10 +66,22 @@ the PR, not as a "resolved" note here).
 - **Coverage afterward**: Add independently implemented modal/detail controls,
   close/retry keyboard navigation, focus visibility and accessibility checks.
   Keep visual preference separate from functional correctness.
-- **Confidentiality decision**: Runtime isolation cannot establish ignorance of
-  publicly published grader code. Decide whether scored holdout tasks, fixtures
-  and oracle implementations belong in a private evaluation package, leaving
-  the reusable infrastructure and synthetic controls public.
+- **Confidentiality boundary**: Runtime isolation cannot establish ignorance of
+  publicly published grader code. Scored holdout inputs and task-specific rules
+  belong in operator-owned private packages; reusable infrastructure and
+  synthetic controls remain public. See [the package contract](../private-evaluation-packages.md).
+
+### Admit private evaluation packages through the canonical campaign route
+
+- **What**: Package freeze/export/replay is diagnostic only. It does not register
+  private evaluators with campaign launch or issue quality receipts.
+- **Why**: An operator-selected evaluator pin must agree across suite intent,
+  Harbor environment/verifier kwargs, task/workflow/runtime identity, fresh
+  quality replay and sealed result import. Task metadata cannot confer host-code
+  authority. A successful offline package control does not prove those bindings.
+- **Next**: Follow [the integration slice](../plans/2026-10-09-private-evaluation-packages.md),
+  preserving separate authoring and solver contexts and proving actual-harness
+  private-asset denial before any scored run. Retain historical result readers.
 
 ### Repair benchmark calibration
 

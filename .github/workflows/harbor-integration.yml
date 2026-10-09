@@ -154,7 +154,7 @@ jobs:
           PY
       - name: Check interactive review and its authority boundary
         if: matrix.lane == 'browser'
-        run: .venv/bin/python -m unittest obench.tests.test_browser_review obench.tests.test_browser_oracle_v2 -v
+        run: .venv/bin/python -m unittest obench.tests.test_browser_review obench.tests.test_browser_oracle_v2 obench.tests.test_evaluation_package -v
       - name: Check effective browser sandbox boundaries
         if: matrix.lane == 'browser'
         run: >-

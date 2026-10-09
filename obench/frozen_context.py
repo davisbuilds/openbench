@@ -112,7 +112,7 @@ def _unique(pairs):
 
 
 def load_archive(path, sha256, *, kind):
-    if kind not in ('context', 'checkout') or not isinstance(sha256, str) or not re.fullmatch('[a-f0-9]{64}', sha256):
+    if kind not in ('context', 'checkout', 'evaluation') or not isinstance(sha256, str) or not re.fullmatch('[a-f0-9]{64}', sha256):
         raise ValueError('archive requires a kind and SHA256 pin')
     raw, _ = _regular(path, MAX_BYTES)
     if hashlib.sha256(raw).hexdigest() != sha256:
