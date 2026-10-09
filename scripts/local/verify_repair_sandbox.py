@@ -13,6 +13,7 @@ import shlex
 import sys
 import tempfile
 import uuid
+import tomllib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from obench.harbor_sandbox import RepairSandbox, SandboxArtifactError, docker_bytes
@@ -69,6 +70,8 @@ async def main():
     parser.add_argument("--task", type=Path, default=Path("benchmarks/harbor/local/dojo-evidence-pr60-v3"))
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()
+    oracle = tomllib.loads((args.task / "task.toml").read_text()).get("metadata", {}).get("openbench_oracle")
+    target = "web/app.js" if oracle == "activity-explorer-v1" else "scripts/profiles/__init__.py"
     token = uuid.uuid4().hex[:12]
     network, server = "obench-probe-" + token, "obench-canary-" + token
     receipt = {"schema": 1, "scope": "Harbor environment, offline gateway rejection, and source lifecycle; no model inference",
@@ -107,7 +110,7 @@ async def main():
                 environment_name="repair-boundary", session_id="repair-boundary-" + token,
                 trial_paths=TrialPaths(root / "trial"),
                 task_env_config=EnvironmentConfig(network_mode="no-network", cpus=1, memory_mb=512),
-                network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), runtime_image=args.runtime_image)
+                network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), runtime_image=args.runtime_image, oracle_id=oracle)
             await env.start()
             receipt["solver_inspect"] = await env._inspect("main")
             with env.scoped_exec_env({"CODEX_AUTH_JSON_PATH": "/host/private/not-for-solver",
@@ -165,6 +168,7 @@ print(json.dumps({'source_read_write':True,'host_paths_denied':True,'symlink_sub
                 "\nwhile not Path('/app/'+sys.argv[1]).exists(): time.sleep(.01)\n"
                 "with Path('/app/scripts/profiles/__init__.py').open('a') as f: f.write('\\n# '+sys.argv[2]+'\\n')"
             )
+            watcher = watcher.replace("scripts/profiles/__init__.py", target)
             for trigger, marker in (("positive-trigger", "POSITIVE-WATCHER"), ("after-stop-trigger", "FORBIDDEN-WATCHER")):
                 await docker_bytes("exec", "--detach", "--user", "10001:10001", env._containers["main"],
                                    "python3", "-c", watcher, trigger, marker)
@@ -178,7 +182,7 @@ print(json.dumps({'source_read_write':True,'host_paths_denied':True,'symlink_sub
                 if trigger == "positive-trigger":
                     await env.exec("touch /app/positive-trigger")
                     for _ in range(100):
-                        observed = await env.exec("grep -q POSITIVE-WATCHER /app/scripts/profiles/__init__.py")
+                        observed = await env.exec("grep -q POSITIVE-WATCHER " + shlex.quote("/app/" + target))
                         if observed.return_code == 0:
                             break
                         await asyncio.sleep(.02)
@@ -195,7 +199,7 @@ print(json.dumps({'source_read_write':True,'host_paths_denied':True,'symlink_sub
             assert hashlib.sha256(ledger).hexdigest() == receipt["frozen_source"]["gateway_ledger_sha256"]
             args.receipt.parent.mkdir(parents=True, exist_ok=True)
             args.receipt.with_suffix(".gateway.jsonl").write_bytes(ledger)
-            source = (frozen / "scripts/profiles/__init__.py").read_text()
+            source = (frozen / target).read_text()
             assert "POSITIVE-WATCHER" in source and "FORBIDDEN-WATCHER" not in source
             receipt["descendant_control"] = {"active_watcher_fired": True, "stopped_watcher_did_not_fire": True}
             assert canary.read_bytes() == before
@@ -208,9 +212,9 @@ print(json.dumps({'source_read_write':True,'host_paths_denied':True,'symlink_sub
                 environment_name="repair-artifact", session_id="repair-artifact-" + token,
                 trial_paths=TrialPaths(root / "artifact-trial"),
                 task_env_config=EnvironmentConfig(network_mode="no-network", cpus=1, memory_mb=512),
-                network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), runtime_image=args.runtime_image)
+                network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), runtime_image=args.runtime_image, oracle_id=oracle)
             await env.start()
-            changed = await env.exec("rm /app/scripts/profiles/__init__.py && ln -s /etc/passwd /app/scripts/profiles/__init__.py")
+            changed = await env.exec("rm " + shlex.quote("/app/" + target) + " && ln -s /etc/passwd " + shlex.quote("/app/" + target))
             assert changed.return_code == 0
             try:
                 await env.freeze_source(root / "rejected-artifact")

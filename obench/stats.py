@@ -1176,6 +1176,10 @@ def _validate_suite_sandbox_policy(manifest):
                       if 'obench.repair_identity' in modules)
     accepted += tuple(modules | {'obench.frozen_context'} for modules in accepted
                       if 'obench.repair_devtools' in modules)
+    accepted += tuple(modules | {'obench.browser_worker', 'obench.browser_policy',
+                                'obench.repair_oracles.activity_explorer'} for modules in accepted
+                      if 'obench.repair_oracles.agentmonitor_v3' in modules
+                      and 'obench.frozen_context' in modules)
     if 'context_sha256' in policy and (not isinstance(hashes, dict) or 'obench.frozen_context' not in hashes):
         raise ValueError('suite context implementation is not sealed')
     if (not isinstance(hashes, dict) or set(hashes) not in accepted

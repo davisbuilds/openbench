@@ -52,10 +52,14 @@ class Provider(http.server.BaseHTTPRequestHandler):
   request=json.loads(body)
   outputs=[item for item in request['input'] if item.get('type') in ('custom_tool_call_output','function_call_output')]
   has_output=bool(outputs)
+  image_received=any(isinstance(i,dict) and i.get('type')=='input_image' for block in request['input'] for i in (block.get('content',[]) if isinstance(block.get('content'),list) else []) ) or any(isinstance(i,dict) and i.get('type')=='input_image' for block in outputs for i in (block.get('output',[]) if isinstance(block.get('output'),list) else []))
   pending=re.search(r'Script running with cell ID ([^\s]+)', str(outputs[-1].get('output',''))) if outputs else None
   if pending:
    serial=str(len(outputs))
    item={'id':'wait_'+serial,'type':'function_call','call_id':'call_wait_'+serial,'name':'wait','arguments':json.dumps({'cell_id':pending[1],'yield_time_ms':60000}), 'status':'completed'}
+  elif has_output and len(sys.argv)>4 and sys.argv[4]=='browser' and not image_received:
+   code='for (const path of ["/logs/agent/browser-before.png", "/logs/agent/browser.png"]) { const result = await tools.view_image({path}); image(result.image_url); }'
+   item={'id':'image_offline','type':'custom_tool_call','call_id':'call_image_offline','name':'exec','input':code,'status':'completed'}
   elif has_output:
    item={'id':'msg_offline','type':'message','role':'assistant','content':[{'type':'output_text','text':'Offline tool transport verified.'}]}
   else:
@@ -113,7 +117,8 @@ async def run(args):
     inspected = inspect_task(args.task)
     receipt.update(task=str(args.task.resolve()), task_binding=inspected['task_binding'])
     app = args.task / 'environment/app'
-    registered = 'src/import/benchmark.ts' if (app / 'src').is_dir() else None
+    browser = inspected['revision']['oracle'] == 'activity-explorer'
+    registered = 'web/app.js' if browser else 'src/import/benchmark.ts' if (app / 'src').is_dir() else None
     target = registered or 'scripts/profiles/__init__.py'
     prefix = '//' if registered else '#'
     command = "set -eu\ntest -n \"${BASH_VERSION:-}\"\ntest \"$(printf '%s ' {alpha,beta})\" = 'alpha beta '\npython3 -m obench.repair_devtools check > /logs/agent/developer-workflow.json\n"
@@ -124,6 +129,8 @@ async def run(args):
     receipt['project_check'] = project_check
     if project_check:
         command += workflow_command(project_check) + '\n'
+    if browser:
+        command += 'node scripts/browser-check.cjs\n'
     command += "printf '\\n" + prefix + " " + MARKER + "\\n' >> " + shlex.quote('/app/' + target) + "\n"
     command += "git diff -- " + shlex.quote(target) + " | rg " + shlex.quote(MARKER) + "\n"
     command += "mkdir /tmp/codex-cleanup-check\nprintf disposable > /tmp/codex-cleanup-check/file\nrm -r /tmp/codex-cleanup-check\ntest ! -e /tmp/codex-cleanup-check\n"
@@ -177,7 +184,7 @@ async def run(args):
             await docker_bytes("exec", "-i", self._containers["broker"], "python3", "-c",
                 "import sys;open('/run/private/fake.py','wb').write(sys.stdin.buffer.read())", data=FAKE.encode())
             await docker_bytes("exec", "--detach", self._containers["broker"], "sh", "-c",
-                "exec python3 /run/private/fake.py " + shlex.quote(model) + " " + shlex.quote(effort) + " " + shlex.quote(encoded_command) + " > /run/private/fake.log 2>&1")
+                "exec python3 /run/private/fake.py " + shlex.quote(model) + " " + shlex.quote(effort) + " " + shlex.quote(encoded_command) + (' browser' if browser else '') + " > /run/private/fake.log 2>&1")
             for _ in range(100):
                 ready = await docker_bytes("exec", self._containers["broker"], "python3", "-c",
                     "import os;print(os.path.exists('/run/openbench-model/gateway.sock'))")
@@ -231,6 +238,22 @@ async def run(args):
         text = (output / "agent/codex.txt").read_text()
         source = (output / "source" / target).read_text()
         requests = [json.loads(line) for line in (output / "requests.jsonl").read_text().splitlines()]
+        if browser:
+            images=[]
+            for request in requests:
+                for block in request['input']:
+                    for key in ('content','output'):
+                        for item in block.get(key,[]) if isinstance(block.get(key),list) else []:
+                            if isinstance(item,dict) and item.get('type')=='input_image': images.append(item)
+            if not images or not (output/'agent/browser.png').is_file():
+                raise RuntimeError('actual Codex screenshot observation did not reach the provider')
+            transported={hashlib.sha256(base64.b64decode(i['image_url'].split(',',1)[1],validate=True)).hexdigest() for i in images}
+            screenshots={name:hashlib.sha256((output/'agent'/name).read_bytes()).hexdigest()
+                         for name in ('browser-before.png','browser.png')}
+            if len(set(screenshots.values()))!=2 or not set(screenshots.values())<=transported:
+                raise RuntimeError('distinct before/after screenshots did not reach the provider unchanged')
+            receipt['browser_image_received']=True
+            receipt['browser_screenshot_sha256']=screenshots['browser.png']
         if FINAL not in text or MARKER not in source:
             raise RuntimeError("actual Codex tool execution or final response was not observed")
         if not registered:
@@ -293,6 +316,8 @@ async def run(args):
         receipt['evidence_sha256'] = {name: hashlib.sha256((output / name).read_bytes()).hexdigest()
                                      for name in ('agent/codex.txt', 'agent/developer-workflow.json',
                                                   'requests.jsonl', 'gateway.jsonl')}
+        if browser:
+            receipt['evidence_sha256'].update({'agent/'+name:digest for name,digest in screenshots.items()})
     except BaseException as error:
         receipt.update(status="failed", error_type=type(error).__name__, error=str(error))
         raise

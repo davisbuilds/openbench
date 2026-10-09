@@ -252,7 +252,7 @@ def solver_env(env: dict | None) -> dict | None:
     return result or None
 
 
-def compose_config(image: str, token: str, *, cpus: float = 2, memory_mb: int = 2048) -> dict:
+def compose_config(image: str, token: str, *, cpus: float = 2, memory_mb: int = 2048, browser: bool = False) -> dict:
     validate_image(image)
     if not re.fullmatch(r"[a-f0-9]{24}", token):
         raise SandboxError("invalid trial namespace")
@@ -269,7 +269,7 @@ def compose_config(image: str, token: str, *, cpus: float = 2, memory_mb: int = 
         "'--socket','" + RELAY_SOCKET + "','--config','/run/private/config.json',"
         "'--auth','/run/private/auth.json'])"
     )
-    return {
+    config = {
         "services": {
             "main": {**restrictions, "container_name": f"obench-sandbox-{token}-solver",
                      "user": f"{UID}:{UID}", "network_mode": "none", "working_dir": "/app",
@@ -289,9 +289,13 @@ def compose_config(image: str, token: str, *, cpus: float = 2, memory_mb: int = 
         "volumes": {key: {"name": name} for key, name in names.items()},
         "networks": {"default": {"name": f"obench-sandbox-{token}-network"}},
     }
+    if browser:
+        from .browser_policy import security_options
+        config['services']['main'].update(security_opt=security_options(), shm_size='256m')
+    return config
 
 
-def verify_inspection(info: dict, *, role: str, image_id: str, volume_names: dict[str, str]) -> None:
+def verify_inspection(info: dict, *, role: str, image_id: str, volume_names: dict[str, str], browser: bool = False) -> None:
     host, config = info["HostConfig"], info["Config"]
     if info.get("Image") != image_id or config.get("User") != (f"{UID}:{UID}" if role == "main" else f"0:{UID}"):
         raise SandboxError("runtime image/user differs from sealed launch")
@@ -301,7 +305,10 @@ def verify_inspection(info: dict, *, role: str, image_id: str, volume_names: dic
         raise SandboxError("container has unapproved privileges")
     if {value.upper() for value in host.get("CapDrop") or []} != {"ALL"}:
         raise SandboxError("container capabilities were not all dropped")
-    if set(host.get("SecurityOpt") or []) not in ({"no-new-privileges"}, {"no-new-privileges:true"}):
+    from .browser_policy import verify_options
+    valid_security = (verify_options(host.get('SecurityOpt')) if browser and role == 'main' else
+                      set(host.get("SecurityOpt") or []) in ({"no-new-privileges"}, {"no-new-privileges:true"}))
+    if not valid_security:
         raise SandboxError("no-new-privileges is absent")
     if host.get("PidMode") or host.get("IpcMode") not in (None, "private") or host.get("UTSMode"):
         raise SandboxError("unapproved shared namespace")
@@ -438,7 +445,8 @@ def _build_environment_class(DockerEnvironment, EnvironmentCapabilities, Network
                 raise SandboxError("source allowlist must select existing workspace files")
             cpus = self._effective_cpus or 2
             memory = self._effective_memory_mb or 2048
-            self._sandbox_config = compose_config(self.runtime_image, self._token, cpus=cpus, memory_mb=memory)
+            self._browser = self._oracle is not None and self._oracle.protocol == 'browser-observations-v1'
+            self._sandbox_config = compose_config(self.runtime_image, self._token, cpus=cpus, memory_mb=memory, browser=self._browser)
             self._volumes = {key: value["name"] for key, value in self._sandbox_config["volumes"].items()}
             self._containers = {key: value["container_name"] for key, value in self._sandbox_config["services"].items()}
             self._network = self._sandbox_config["networks"]["default"]["name"]
@@ -504,7 +512,7 @@ os.chown('/run/openbench-model', 0, 10001)
                     data=pack_files(self._seed_files, self._seed_modes))
                 await self._run_docker_compose_command(["up", "--detach", "--wait"], timeout_sec=60)
                 for role in ("main", "broker"):
-                    verify_inspection(await self._inspect(role), role=role, image_id=self._image_id, volume_names=self._volumes)
+                    verify_inspection(await self._inspect(role), role=role, image_id=self._image_id, volume_names=self._volumes, browser=self._browser)
                 self._started = True
                 await self._stage_context()
                 from . import repair_devtools

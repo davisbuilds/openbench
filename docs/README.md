@@ -4,6 +4,8 @@
 - [Setup](guides/setup.md) and [task authoring](guides/contributing-tasks.md).
 - [Campaign launch and recovery](benchmark-operations.md).
 - [Fork workflow](project/FORK_WORKFLOW.md), [backlog](project/BACKLOG.md), and [extra-hard repair work](project/EXTRA_HARD_REPAIRS.md).
+- [Practical agent evaluation design](project/PRACTICAL_AGENT_EVAL_DESIGN.md): task families, outcome measures, usability evaluation, and browser runtime requirements.
+- [Activity explorer calibration candidate](../benchmarks/harbor/local/activity-explorer-c1-o1/README.md): first browser task, scoring limits, runtime and quality controls.
 - [Token accounting contract](reference/token-accounting.md).
 - Historical [results](reports/results.md), [writeup](reports/writeup.md), and [architecture diagram](system/openbench-architecture.html).
 

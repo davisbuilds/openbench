@@ -27,7 +27,8 @@ def grade_submission(root, oracle, image, *, timeout=90):
             raise CandidateFailure('source outside trusted oracle policy')
         archive,hashes=repair_worker.source_archive(Path(root),permitted)
         observations,worker=repair_worker.run_worker(image,archive,
-            [request for _,_,request in module.cases()],program=module.worker_program(),timeout=timeout)
+            [request for _,_,request in module.cases()],program=module.worker_program(),timeout=timeout,
+            **({'browser':True} if oracle.protocol=='browser-observations-v1' else {}))
         graded=module.grade(observations)
         for check, observed in zip(graded['checks'], observations, strict=True):
             check.update(id=check['case'], observed=observed)
