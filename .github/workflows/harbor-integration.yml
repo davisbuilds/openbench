@@ -16,9 +16,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  sandbox:
+  integration:
+    name: integration (${{ matrix.lane }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # Measured serial job: 24m43s. Separate runners keep browser waits and
+    # concurrency controls off the repair lane's critical path. Cold builds
+    # remain bounded; no grading/admission replay is cached or omitted.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [repair, browser, concurrency]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,6 +43,7 @@ jobs:
           uv venv --python 3.13 .venv
           uv pip sync --build-constraint .github/requirements/harbor-build.txt .github/requirements/harbor.txt
       - name: Replay real Codex trajectory conversion
+        if: matrix.lane == 'repair'
         run: .venv/bin/python scripts/local/verify_repair_trajectory.py --output results/ci/trajectory
       - name: Build the isolated runtime
         run: |
@@ -46,44 +55,53 @@ jobs:
               stream.write(f'OBENCH_GRADING_TEST_IMAGE={image}\n')
           PY
       - name: Check stream lifecycle in the runtime's Python
+        if: matrix.lane == 'repair'
         run: |
           docker run --rm --network none --cap-drop ALL \
             --security-opt no-new-privileges --user 10001:10001 -i \
             "$OBENCH_GRADING_TEST_IMAGE" python3 - -v < obench/tests/test_sandbox_gateway.py
       - name: Check Docker grading controls
+        if: matrix.lane == 'repair'
         run: .venv/bin/python -m unittest obench.tests.test_sandbox_grading.DockerGradingTests -v
       - name: Check registered repair oracle and alternative valid repairs
+        if: matrix.lane == 'repair'
         run: >-
           .venv/bin/python scripts/local/verify_registered_repair.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/registered-oracle
       - name: Check quality admission, forged receipts and grader stability
+        if: matrix.lane == 'repair'
         run: >-
           .venv/bin/python scripts/ci/verify_repair_quality.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/repair-quality
       - name: Check registered oracle through Harbor lifecycle
+        if: matrix.lane == 'repair'
         run: >-
           .venv/bin/python scripts/local/verify_registered_lifecycle.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/registered-lifecycle
       - name: Check concurrent upgrade development controls
+        if: matrix.lane == 'concurrency'
         run: >-
           .venv/bin/python scripts/local/verify_am123_oracle.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/am123-oracle
       - name: Check effective sandbox boundaries
+        if: matrix.lane == 'repair'
         run: >-
           .venv/bin/python scripts/local/verify_repair_sandbox.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --receipt results/ci/boundary.json
       - name: Check the real Codex tool loop without inference
+        if: matrix.lane == 'repair'
         run: >-
           .venv/bin/python scripts/local/verify_repair_codex.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --task benchmarks/harbor/local/dojo-evidence-pr60-v4
           --output-dir results/ci/codex-tool-loop
       - name: Check GPT-6 Sol and Luna tool loops without inference
+        if: matrix.lane == 'repair'
         run: |
           for model in gpt-6-sol-low gpt-6-luna-max; do
             .venv/bin/python scripts/local/verify_repair_codex.py \
@@ -92,21 +110,25 @@ jobs:
               --model "$model" --output-dir "results/ci/tool-loop-$model"
           done
       - name: Check developer workflows in both supplied repair checkouts
+        if: matrix.lane == 'repair'
         run: >-
           .venv/bin/python scripts/local/verify_repair_developer.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/developer-workflows
       - name: Check frozen instructions, skills, resources and executable checkout files
+        if: matrix.lane == 'repair'
         run: >-
           .venv/bin/python scripts/local/verify_frozen_context.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/frozen-context
       - name: Check completion and timeout across real Harbor cleanup
+        if: matrix.lane == 'repair'
         run: >-
           .venv/bin/python scripts/ci/verify_sandbox_timeouts.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --output results/ci/timeouts
       - name: Check source grading and artifact import through Harbor
+        if: matrix.lane == 'repair'
         run: >-
           .venv/bin/python scripts/local/verify_repair_lifecycle.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
@@ -114,12 +136,14 @@ jobs:
           --reference benchmarks/local/dojo-evidence-pr60/solution
           --output results/ci/lifecycle
       - name: Check bounded log export and refusal
+        if: matrix.lane == 'repair'
         run: >-
           .venv/bin/python scripts/local/verify_repair_log_export.py
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --task benchmarks/harbor/local/dojo-evidence-pr60-v4
           --output results/ci/log-export
       - name: Build the isolated browser variant
+        if: matrix.lane == 'browser'
         run: |
           python3 scripts/local/build_browser_runtime.py --base-image "$OBENCH_GRADING_TEST_IMAGE" --receipt results/ci/browser-runtime.json
           python3 - <<'PY'
@@ -129,12 +153,14 @@ jobs:
               stream.write(f'OBENCH_BROWSER_IMAGE={image}\n')
           PY
       - name: Check effective browser sandbox boundaries
+        if: matrix.lane == 'browser'
         run: >-
           .venv/bin/python scripts/local/verify_repair_sandbox.py
           --runtime-image "$OBENCH_BROWSER_IMAGE"
           --task benchmarks/harbor/local/activity-explorer-c1-o1
           --receipt results/ci/browser-boundary.json
       - name: Check actual Codex screenshot transport without inference
+        if: matrix.lane == 'browser'
         run: >-
           .venv/bin/python scripts/local/verify_repair_codex.py
           --runtime-image "$OBENCH_BROWSER_IMAGE"
@@ -142,11 +168,13 @@ jobs:
           --model gpt-6-sol-high --project-check 'pnpm build'
           --output-dir results/ci/browser-workflow
       - name: Check real browser controls and distinct valid layouts
+        if: matrix.lane == 'browser'
         run: >-
           .venv/bin/python scripts/local/verify_browser_quality.py
           --image "$OBENCH_BROWSER_IMAGE" --output results/ci/browser-quality
           --workflow results/ci/browser-workflow/receipt.json
       - name: Check browser grading and import through Harbor
+        if: matrix.lane == 'browser'
         run: >-
           .venv/bin/python scripts/local/verify_browser_lifecycle.py
           --runtime-image "$OBENCH_BROWSER_IMAGE" --output results/ci/browser-lifecycle
@@ -154,11 +182,12 @@ jobs:
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: repair-quality-summary
+          name: repair-quality-summary-${{ matrix.lane }}
           path: |
             results/ci/repair-quality/summary.json
             results/ci/browser-quality/summary.json
             results/ci/browser-lifecycle/summary.json
+            results/ci/am123-oracle/summary.json
           if-no-files-found: error
           retention-days: 14
       - name: Check sandbox cleanup
@@ -173,3 +202,16 @@ jobs:
             echo 'Sandbox resources survived the integration checks'
             exit 1
           fi
+
+  # Preserve the existing required-check name and fail closed if any matrix
+  # lane fails or is cancelled. Skipped upstream jobs cannot satisfy the gate.
+  sandbox:
+    if: always()
+    needs: integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every integration lane
+        env:
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+        run: test "$INTEGRATION_RESULT" = success
