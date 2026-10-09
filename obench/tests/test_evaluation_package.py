@@ -185,7 +185,7 @@ class PackageTests(unittest.TestCase):
 
     def test_browser_titles_must_already_have_canonical_accessible_whitespace(self):
         row = {'id': 'one', 'title': 'A B', 'project': 'Project', 'status': 'running', 'description': 'Details'}
-        for title in (' Record ', 'A  B', 'A\tB', 'A\nB', 'A\u00a0B', 'A\u200b B', 'A\u00ad B'):
+        for title in (' Record ', 'A  B', 'A\tB', 'A\nB', 'A\u00a0B', 'A\u200b B', 'A\u00ad B', 'A\ufeffB'):
             with self.subTest(title=title):
                 files = fixture()
                 files['cases.json'] = json.dumps([{'id': 'list', 'bucket': 'content', 'request': {

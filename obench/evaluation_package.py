@@ -49,7 +49,8 @@ Those protocol assumptions are different from arbitrary application test data.
                 or not row['id'] or not row['title'].strip()
                 or row['status'] not in ('running', 'completed', 'failed')):
             raise ValueError('browser request contains an invalid activity record')
-        accessible_title = ' '.join(row['title'].replace('\u200b', '').replace('\u00ad', '').split())
+        accessible_title = ' '.join(row['title'].replace('\u200b', '').replace('\u00ad', '')
+                                    .replace('\ufeff', ' ').split())
         if accessible_title != row['title']:
             raise ValueError('browser request title must use canonical accessible-name whitespace')
         if row['id'] in ids or accessible_title.lower() in titles:

@@ -49,8 +49,8 @@ The browser request requires `mode` (`list`, `loading`, `retry`, `detail`,
 `project`, `status`, and `description` fields. IDs and case-insensitive titles
 must be unique; titles/IDs are nonempty and statuses are `running`, `completed`
 or `failed`. Titles must already use canonical accessible-name whitespace:
-single spaces without leading/trailing whitespace, soft hyphens or zero-width
-spaces. The fixed backend uses anchored accessible-name locators; unsupported
+single spaces without leading/trailing whitespace, soft hyphens, byte-order
+marks or zero-width spaces. The fixed backend uses anchored accessible-name locators; unsupported
 titles are rejected rather than silently changing the evaluation input.
 Detail/keyboard modes need at least one record. Optional `query`
 is a string; `status` is `Running`, `Completed` or `Failed` (omit for All).
