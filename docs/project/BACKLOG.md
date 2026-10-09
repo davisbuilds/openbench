@@ -22,20 +22,54 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
-### Browser oracle coverage before expanding the task pool
+### Revise UI acceptance and score interpretation before another pilot
 
-- **What**: The first activity-explorer oracle covers declared functional and
-  geometry checks, not comprehensive accessibility or adversarial page behavior.
-- **Evidence**: The list/card controls share their interaction code. Keyboard
-  controls currently cover search/status/record navigation and detail opening;
-  focus appearance and close/retry navigation still need human inspection.
-  Some geometry observations execute in the page's JavaScript world.
-- **Next**: Add an independently implemented modal/detail layout, explicit
-  close/retry/focus controls, and deliberate browser-observation tampering cases.
-  Move observation code into an isolated execution world if those cases show
-  influence from candidate JavaScript. Keep design preference separately scored.
-- **Revisit when**: Expanding beyond the initial calibration task or making
-  accessibility/adversarial-integrity claims.
+- **What**: Accept equivalent accessible detail presentations and cosmetic text
+  transformations; separate strict task completion from diagnostic severity.
+- **Evidence**: The first pilot's artifact audit reproduced a labeled modal
+  rejected by a region-only locator, uppercase project text rejected by a
+  case-sensitive predicate, and genuinely undersized 21.6px activity buttons
+  against the declared 24px minimum. One presentation choice affected three
+  all-or-nothing buckets. A low bucket score is not the fraction of implemented
+  functionality. Earlier browser controls also exposed status/paragraph,
+  metadata-button and asynchronous-filter false negatives.
+- **Next**: Create a new oracle revision accepting region or dialog and verifying
+  content independently of CSS capitalization. If the prompt's region requirement
+  is relaxed, advance the case revision too. Add independently implemented modal
+  and transformed-text positive controls, plus missing-content, broken focus,
+  clipping and undersized-target negatives. Report per-check outcomes, severity
+  and shared failure causes alongside strict pass rate; calibrate aggregation
+  before declaring a replacement headline score. Do not invent severity weights
+  solely to change the current model ranking.
+- **Historical evidence**: Preserve original scores. Replay frozen submissions
+  under the separately identified corrected oracle and distinguish those results
+  from new model attempts. Audit earlier tasks individually rather than applying
+  UI-specific score adjustments to PR repairs. Interactive review is documented
+  in [browser review](../browser-review.md); it never writes benchmark rewards.
+
+### Browser observation integrity blocks further scored UI runs
+
+- **What**: Candidate JavaScript can tamper with main-world DOM measurement APIs
+  used by the browser grader. Hiding the oracle alone does not protect verdicts.
+- **Evidence**: An offline October 2026 controlled probe scored an accepted list
+  at 1.00, the same list with deliberately clipped titles at 0.75, and the clipped
+  list with overridden width/text-range measurements at 1.00. This establishes a
+  grader bypass, not evidence of cheating by any pilot model.
+- **Next**: Move observations out of the candidate JavaScript world and use
+  browser-owned geometry/accessibility where possible. Prove the corrected
+  runtime still observes valid behavior and rejects the demonstrated tampering,
+  plus forged observations and oracle/reward access. Ship a versioned oracle;
+  retain the old implementation for explicitly labeled historical replay.
+- **Gate**: No further scored UI runs until these controls pass. Diagnostic
+  review remains useful, with screenshots and candidate-derived text clearly
+  distinguished from authoritative measurements.
+- **Coverage afterward**: Add independently implemented modal/detail controls,
+  close/retry keyboard navigation, focus visibility and accessibility checks.
+  Keep visual preference separate from functional correctness.
+- **Confidentiality decision**: Runtime isolation cannot establish ignorance of
+  publicly published grader code. Decide whether scored holdout tasks, fixtures
+  and oracle implementations belong in a private evaluation package, leaving
+  the reusable infrastructure and synthetic controls public.
 
 ### Repair benchmark calibration
 

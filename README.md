@@ -462,3 +462,10 @@ at 0/n and n/n, which the naive formula does not.
 ## License
 
 OpenBench is available under the MIT License. See [LICENSE](LICENSE).
+
+### Interactive UI artifact review
+
+Use [`obench review`](docs/browser-review.md) to explore frozen activity-explorer
+submissions through a shared human/agent interface. Candidate JavaScript stays
+in an isolated browser; screenshots, accessible controls and recorded actions
+remain separate from benchmark scores.
