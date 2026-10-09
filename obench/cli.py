@@ -79,6 +79,7 @@ def main(argv=None):
     )
     sub.add_parser("matrix", help="retry-aware queue-based benchmark runner", add_help=False)
     sub.add_parser("bridge", help="manage the open-model bridge (LiteLLM proxy) lifecycle", add_help=False)
+    sub.add_parser("review", help="interact with frozen UI submissions in an isolated browser", add_help=False)
     sub.add_parser("results", help="query results: summary/pertask/matched/errors/evidence", add_help=False)
     sub.add_parser("export", help="export tasks to external formats (harbor)", add_help=False)
     sub.add_parser("import", help="import tasks from external formats (harbor)", add_help=False)
@@ -98,18 +99,21 @@ def main(argv=None):
         return 0
 
     known = {
-        "repair", "campaign", "run", "legacy", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
+        "review", "repair", "campaign", "run", "legacy", "report", "doctor", "validate", "admit", "gateway", "router", "harbor", "gate", "compare", "init",
         "matrix", "bridge", "results", "publish", "verify", "community", "leaderboard",
         "site", "pack", "export",
         "import",
     }
     if command not in known:
         parser.error(
-            f"unknown command {command!r}; choose from campaign, repair, run, legacy, report, doctor, "
+            f"unknown command {command!r}; choose from review, campaign, repair, run, legacy, report, doctor, "
             "validate, admit, gateway, router, harbor, gate, compare, init, publish, verify, community, "
             "leaderboard, results, site, pack, export, import, matrix, bridge"
         )
 
+    if command == "review":
+        from .browser_review import main as review_main
+        return review_main(rest)
     if command == "campaign":
         from .campaign import main as campaign_main
         return campaign_main(rest)

@@ -152,6 +152,9 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as stream:
               stream.write(f'OBENCH_BROWSER_IMAGE={image}\n')
           PY
+      - name: Check interactive review and its authority boundary
+        if: matrix.lane == 'browser'
+        run: .venv/bin/python -m unittest obench.tests.test_browser_review -v
       - name: Check effective browser sandbox boundaries
         if: matrix.lane == 'browser'
         run: >-
