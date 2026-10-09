@@ -60,7 +60,7 @@ class TestBuildDockerCmd(unittest.TestCase):
 
     def test_gpt6_aliases_are_rejected_before_legacy_container_preflight(self):
         self.assertIsNone(docker_exec.require_supported_legacy_model('codex', 'gpt-5.6-terra'))
-        for model in ('gpt-6-sol-low', 'gpt-6-luna-max'):
+        for model in ('gpt-6.1-sol-high', 'gpt-6-sol-low', 'gpt-6-luna-max'):
             with self.subTest(model=model), mock.patch.object(docker_exec, 'preflight', side_effect=AssertionError('Docker must not start')):
                 with self.assertRaisesRegex(ValueError, 'legacy Docker'):
                     docker_exec.run_in_container('codex', 'fixture', '/tmp/wd', model, 10,

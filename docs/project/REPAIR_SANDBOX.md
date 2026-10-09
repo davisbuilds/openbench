@@ -9,6 +9,10 @@ The native calibration exposed reference/checker files from another worktree;
 those scores remain withdrawn as difficulty evidence. HOME isolation did not
 restrict reads or SSH. The new lane enforces those boundaries in Docker.
 
+The current runtime pins Codex 0.162.0 for GPT-6.1 Sol metadata; new Sol
+campaigns select `gpt-6.1-sol-high`. All selected arms require renewed controls
+on the new image. Historical 0.154.0/0.157.0 results remain importable.
+
 The 2026-09-26 Sol/Luna support update moves the current runtime to Codex
 0.157.0 because 0.154.0 lacks their model metadata. Both new models pass the
 credential-free tool-loop probe on 0.157.0. Prior authenticated receipts remain
@@ -41,7 +45,7 @@ hold source and logs. A third volume exposes only the broker socket, read-only
 to the solver. The relay contains no credentials. Bypassing or replacing it
 still grants only the broker's restricted inference capability.
 
-The runtime build context contains the pinned dependencies, Codex 0.157.0, and
+The runtime build context contains the pinned dependencies, Codex 0.162.0, and
 public gateway/relay and developer-bootstrap code. It contains no task, reference solution, grader,
 repository history, or personal configuration. The trusted environment copies
 only `environment/app/` into a fresh source volume before execution. Task-authored
@@ -58,7 +62,7 @@ archives, preserving project guidance and executable file modes.
 ### Developer environment (default for new repairs)
 
 `build_repair_runtime.py` builds developer environment revision 3, tagged
-`dev-v3-codex-0.157.0` for convenience. Suites must use its immutable image ID.
+`dev-v3-codex-0.162.0` for convenience. Suites must use its immutable image ID.
 The build receipt records the context hashes, effective tool versions and passing
 nonroot, read-only-root, offline developer workflow checks. An image digest is
 the exact treatment identity; the label is a human-readable feature revision.

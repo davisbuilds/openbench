@@ -17,7 +17,7 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && npm install --global @openai/codex@0.157.0 pnpm@10.29.3 \
+    && npm install --global @openai/codex@0.162.0 pnpm@10.29.3 \
     && python3 -m pip install --no-cache-dir PyYAML==6.0.3 pytest==8.3.5 \
          iniconfig==2.1.0 packaging==25.0 pluggy==1.6.0 \
     && groupadd --gid 10001 solver \

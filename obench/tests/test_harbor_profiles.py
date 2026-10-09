@@ -32,6 +32,7 @@ class HarborProfileTests(unittest.TestCase):
                         "gpt-5.6-terra",
                         "gpt-6-luna",
                         "gpt-6-sol",
+                        "gpt-6.1-sol",
                     ),
                 ),
                 (
@@ -126,11 +127,11 @@ class HarborProfileTests(unittest.TestCase):
                     self.assertIsNone(config)
 
     def test_sol_luna_stock_profiles_pin_cli_effort_and_normal_tier(self):
-        for model, effort in [('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
+        for model, effort in [('gpt-6.1-sol', 'low'), ('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
             with self.subTest(model=model):
                 profile = resolve_harbor_profile('codex', model)
                 self.assertEqual(profile.harbor_model_name, model)
-                self.assertEqual(profile.cli_version, '0.157.0')
+                self.assertEqual(profile.cli_version, '0.162.0' if model == 'gpt-6.1-sol' else '0.157.0')
                 self.assertEqual(dict(profile.flags)['reasoning_effort'], effort)
                 self.assertEqual(profile.agent_kwargs()['config']['service_tier'], 'default')
 

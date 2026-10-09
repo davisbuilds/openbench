@@ -56,6 +56,11 @@ out. Preserve the runtime for confirmation rather than silently repairing the
 environment between samples. Trial-level audit evidence stays local under
 `results/gpt6-screen-20260926/audit/` on the execution host.
 
+Current default (2026-10-09): new Sol arms use `gpt-6.1-sol-high`. Keep Luna
+at `gpt-6-luna-max` and Terra at `gpt-5.6-terra-xhigh`. See the
+[execution defaults](../benchmark-operations.md#default-model-lineup-for-new-campaigns).
+The dated choices below describe prior treatments, not the next campaign.
+
 User direction, 2026-09-26: retain GPT-5.6 Terra, add GPT-6 Sol, and replace
 GPT-5.6 Luna with GPT-6 Luna for future calibration. Historical model identities,
 specs and sealed results remain unchanged; the new lineup is a fresh treatment.

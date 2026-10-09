@@ -1162,7 +1162,7 @@ def _validate_suite_sandbox_policy(manifest):
         raise ValueError("suite manifest sandbox arms are invalid")
     needs_registry = any(
         isinstance(arm.get("canonical_model"), str)
-        and arm["canonical_model"].startswith(("gpt-6-sol", "gpt-6-luna"))
+        and arm["canonical_model"].startswith(("gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"))
         for arm in arms
     )
     accepted = (base_modules | {"obench.codex_models"},

@@ -37,7 +37,7 @@ class SandboxSuiteTests(unittest.TestCase):
         self.assertEqual(compiled.manifest['sandbox']['request_timeout_seconds'], 1200)
         self.assertEqual(config['verifier']['import_path'], 'obench.sandbox_grading:RepairVerifier')
         self.assertEqual(config['agents'][0]['import_path'], 'obench.harbor_agents.sandbox_codex:SandboxCodex')
-        self.assertEqual(config['agents'][0]['kwargs']['version'], '0.157.0')
+        self.assertEqual(config['agents'][0]['kwargs']['version'], '0.162.0')
         self.assertEqual(config['agents'][0]['kwargs']['reasoning_effort'], 'xhigh')
         self.assertEqual(config['agents'][0]['model_name'], 'gpt-5.6-terra')
         self.assertEqual(compiled.manifest['sandbox']['kind'], 'repair-v1')
@@ -75,7 +75,7 @@ class SandboxSuiteTests(unittest.TestCase):
     def test_sol_luna_compile_with_explicit_identity_and_distinct_seals(self):
         base = self.base
         seals = set()
-        for model, default in [('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
+        for model, default in [('gpt-6.1-sol', 'low'), ('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
             for suffix, effort in [('', default)] + [('-' + e, e) for e in ('low', 'medium', 'high', 'xhigh', 'max')]:
                 alias = model + suffix
                 with self.subTest(alias=alias):
@@ -89,11 +89,11 @@ class SandboxSuiteTests(unittest.TestCase):
                     self.assertEqual(agent['import_path'], 'obench.harbor_agents.sandbox_codex:SandboxCodex')
                     self.assertIn('obench.codex_models', compiled.manifest['sandbox']['implementation_sha256'])
                     seals.add(compiled.manifest_sha256)
-        self.assertEqual(len(seals), 12)
+        self.assertEqual(len(seals), 18)
 
     def test_unlisted_model_or_effort_cannot_compile_into_repair_lane(self):
         base = self.base
-        for alias in ('gpt-6-sol-ultra', 'gpt-6-luna-none', 'gpt-6-luna-typo', 'gpt-6-astra-max'):
+        for alias in ('gpt-6.1-sol-ultra', 'gpt-6.1-sol-typo', 'gpt-6-sol-ultra', 'gpt-6-luna-none', 'gpt-6-luna-typo', 'gpt-6-astra-max'):
             self.base = base.replace('gpt-5.6-terra-xhigh', alias)
             with self.subTest(alias=alias), self.assertRaisesRegex(suite_run.SuiteRunError, 'repair sandbox'):
                 self.compile()

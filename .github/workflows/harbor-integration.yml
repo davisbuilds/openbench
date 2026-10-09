@@ -100,10 +100,10 @@ jobs:
           --runtime-image "$OBENCH_GRADING_TEST_IMAGE"
           --task benchmarks/harbor/local/dojo-evidence-pr60-v4
           --output-dir results/ci/codex-tool-loop
-      - name: Check GPT-6 Sol and Luna tool loops without inference
+      - name: Check GPT-6.1 Sol, GPT-6 Sol and Luna tool loops without inference
         if: matrix.lane == 'repair'
         run: |
-          for model in gpt-6-sol-low gpt-6-luna-max; do
+          for model in gpt-6.1-sol-high gpt-6-sol-low gpt-6-luna-max; do
             .venv/bin/python scripts/local/verify_repair_codex.py \
               --runtime-image "$OBENCH_GRADING_TEST_IMAGE" \
               --task benchmarks/harbor/local/dojo-evidence-pr60-v4 \
@@ -172,7 +172,7 @@ jobs:
           .venv/bin/python scripts/local/verify_repair_codex.py
           --runtime-image "$OBENCH_BROWSER_IMAGE"
           --task benchmarks/harbor/local/activity-explorer-c1-o1
-          --model gpt-6-sol-high --project-check 'pnpm build'
+          --model gpt-6.1-sol-high --project-check 'pnpm build'
           --output-dir results/ci/browser-workflow
       - name: Check real browser controls and distinct valid layouts
         if: matrix.lane == 'browser'

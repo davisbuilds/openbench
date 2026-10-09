@@ -17,7 +17,7 @@ def main():
     args = parser.parse_args()
     for task in TASKS:
         subprocess.run([sys.executable, str(ROOT / 'scripts/local/verify_repair_codex.py'),
-                        '--runtime-image', args.runtime_image, '--model', 'gpt-6-sol-high',
+                        '--runtime-image', args.runtime_image, '--model', 'gpt-6.1-sol-high',
                         '--task', str(ROOT / 'benchmarks/harbor/local' / task),
                         '--output-dir', str(args.output / task)], check=True, cwd=ROOT)
     (args.output / 'receipt.json').write_text(json.dumps({

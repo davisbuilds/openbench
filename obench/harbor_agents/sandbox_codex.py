@@ -16,7 +16,7 @@ import stat
 
 from obench.codex_models import REPAIR_MODEL_PAIRS, SOL_LUNA_DEFAULTS
 
-CLI_VERSION = "0.157.0"
+CLI_VERSION = "0.162.0"
 # Defaults retained for trajectory diagnostics; admission uses exact pairs.
 MODELS = {"gpt-5.6-terra": "xhigh", "gpt-5.6-luna": "max", **SOL_LUNA_DEFAULTS}
 

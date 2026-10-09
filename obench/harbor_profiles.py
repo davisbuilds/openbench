@@ -315,7 +315,7 @@ def _codex_config(model: str) -> str:
             "multi_agent": False,
         },
     }
-    if model.startswith(("gpt-5.6-", "gpt-6-")):
+    if model.startswith(("gpt-5.6-", "gpt-6-", "gpt-6.1-")):
         config["service_tier"] = "default"
     return json.dumps(config, sort_keys=True, separators=(",", ":"))
 
@@ -386,7 +386,8 @@ def resolve_harbor_profile(
         model=model,
         semantic_name=harness,
         agent_import_path=_IMPORTS[harness],
-        cli_version=("0.157.0" if harness == "codex" and model in SOL_LUNA_DEFAULTS
+        cli_version=("0.162.0" if harness == "codex" and model == "gpt-6.1-sol"
+                     else "0.157.0" if harness == "codex" and model in SOL_LUNA_DEFAULTS
                      else _VERSIONS[harness]),
         harbor_model_name=harbor_model,
         flags=flags,
