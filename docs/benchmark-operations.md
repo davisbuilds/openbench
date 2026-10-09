@@ -173,3 +173,12 @@ Before a new repair campaign, follow [repair validation](repair-validation.md).
 Runtime admission alone is insufficient. Provide one current `--quality` receipt
 per task, binding valid/defective repair controls and an exact-checkout workflow
 probe. Historical Dojo oracles 3–5 are diagnostic-only for new admission.
+
+## UI pilot execution budget
+
+Pin `timeout_seconds = 1800` in the UI pilot suite's `[run]` table: 30 minutes
+per model attempt for implementation, browser inspection, and correction.
+The canonical compiler overrides the task's agent timeout with the suite value;
+the task's 30-minute declaration alone does not override the suite's general
+20-minute default. Keep other suites unchanged and preserve existing qualification
+suite files as historical evidence. A prepared pilot suite is not a launch.

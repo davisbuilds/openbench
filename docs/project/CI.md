@@ -18,6 +18,20 @@ Keep the existing `test (3.11)`, `test (3.13)`, and `check` job names stable whe
 changing workflows. If required-check configuration is introduced or changed,
 coordinate its names with the jobs. Integration exercises the actual Harbor
 Trial lifecycle; whole-suite assembly/import also has offline contract tests.
+Harbor integration uses three independent hosted runners: repair, browser, and
+concurrency-repair controls. Each installs the same frozen graph, builds its own
+runtime, preserves all existing checks, and verifies cleanup. The `sandbox`
+aggregate remains the gate and succeeds only when every lane succeeds; a failed,
+cancelled, or skipped matrix cannot pass it. Summaries use lane-specific artifact
+names. Each lane has a 20-minute bound, with a two-minute aggregate job.
+
+The previous serial job took 24m43s: browser quality/replay used 7m56s,
+concurrency controls 3m50s, and the base build 1m59s. Separating these workloads
+reduces the critical path at the cost of two extra cold image builds. Grading and
+fresh admission replay still run uncached. Runtime caches or fewer controls are
+not needed for this first optimization; compare hosted timings before further
+changes.
+
 The integration lane does not establish model accuracy or authenticated provider
 connectivity. Hosted Linux coverage complements local Docker-on-macOS checks.
 
