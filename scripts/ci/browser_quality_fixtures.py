@@ -105,6 +105,9 @@ def prepare(root, *, adversarial=False):
     }
     if adversarial:
         variants.update({
+            'pointer-only-retry':(HTML.replace('<button id="retry" hidden>Retry</button>',
+                '<div id="retry" role="button" hidden>Retry</div>'),JS,CSS),
+            'blocked-keyboard-retry':(HTML,JS+'\nretry.onkeydown=e=>e.preventDefault();',CSS),
             'valid-modal':(MODAL_HTML,MODAL_JS,MODAL_CSS),
             'valid-poisoned':(HTML,JS+POISON_CLIP+POISON_ORDER+POISON_TEXT+POISON_GLOBALS,CSS),
             'tampered-clipping':(HTML,JS+POISON_CLIP,CSS+CLIPPING),

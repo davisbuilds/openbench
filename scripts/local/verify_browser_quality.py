@@ -38,7 +38,8 @@ def main():
              'invisible-body':['layout-360','detail','detail-mobile'],
              'invisible-html':['layout-360','detail','detail-mobile'],
              'faded-ancestors':['layout-360','detail','detail-mobile'],
-             'invisible-details':['detail','detail-mobile']}
+             'invisible-details':['detail','detail-mobile'],
+             'pointer-only-retry':'retry', 'blocked-keyboard-retry':'retry'}
     def must_fail(name):
         value=targets.get(name,'search')
         return [value] if isinstance(value,str) else value
