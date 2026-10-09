@@ -91,7 +91,7 @@ print(json.dumps({'type':'turn.completed','usage':{}}))
         self.assertEqual(codex.model_identity('gpt-6-astra')['reasoning_effort'], 'medium')
 
     def test_sol_luna_efforts_reach_cli_and_result_identity(self):
-        for model, default in [('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
+        for model, default in [('gpt-6.1-sol', 'low'), ('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
             for suffix, effort in [('', default)] + [('-' + e, e) for e in ('low', 'medium', 'high', 'xhigh', 'max')]:
                 alias = model + suffix
                 with self.subTest(alias=alias):
@@ -138,7 +138,7 @@ print(json.dumps({'type':'turn.completed','usage':{}}))
         event = {'type':'turn.completed', 'usage':{'input_tokens':20,
                  'cached_input_tokens':5, 'output_tokens':3, 'reasoning_output_tokens':1}}
         proc = subprocess.CompletedProcess(['codex'], 0, json.dumps(event), '')
-        for model in ('gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna'):
+        for model in ('gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna'):
             with self.subTest(model=model), mock.patch.object(codex.subprocess, 'run', return_value=proc):
                 result = codex.run('fixture', str(self.root), model, 5,
                                    env_override=self.env, replace_env=True)

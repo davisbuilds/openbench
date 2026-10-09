@@ -365,7 +365,7 @@ class ProxyTests(unittest.TestCase):
         self.assertFalse(run.proxy_supported_for_cell("devin", "gpt-5.5-medium"))
 
     def test_sol_luna_proxy_eligibility_and_sampling_preserve_selected_effort(self):
-        for model, default in [('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
+        for model, default in [('gpt-6.1-sol', 'low'), ('gpt-6-sol', 'low'), ('gpt-6-luna', 'medium')]:
             for suffix, effort in [('', default)] + [('-' + e, e) for e in ('low', 'medium', 'high', 'xhigh', 'max')]:
                 alias = model + suffix
                 with self.subTest(alias=alias):

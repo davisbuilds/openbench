@@ -84,7 +84,7 @@ class RuntimeAdmissionTests(unittest.TestCase):
         return {'status':'passed', 'cleanup_confirmed':True,
             'live_inference':False, 'real_credentials':False, 'model_alias':alias,
             'model':record['model'], 'effort':record['effort'],
-            'runtime_image':expected['image']['requested'], 'codex_version':'0.157.0',
+            'runtime_image':expected['image']['requested'], 'codex_version':'0.162.0',
             'probe_sha256':expected['implementation'][admission.SCRIPTS[1]],
             'actual_tool_mutation':True, 'tool_result_returned':True,
             'final_response_present':True, 'request_count':2, 'developer_workflows_passed':True}

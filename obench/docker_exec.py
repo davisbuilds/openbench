@@ -610,8 +610,8 @@ def image_digest(image):
 
 def require_supported_legacy_model(harness, model):
     if harness in {"codex", "codex_v1", "codex_v2"} and model in SOL_LUNA_PAIRS:
-        raise ValueError("GPT-6 Sol/Luna are unsupported in the legacy Docker image; "
-                         "use a qualified repair-v1 suite or native Codex 0.157.0")
+        raise ValueError("GPT-6/6.1 Sol and Luna are unsupported in the legacy Docker image; "
+                         "use a qualified repair-v1 suite or a compatible native Codex CLI")
 
 
 def run_in_container(harness, instruction, workdir, model, timeout_s,

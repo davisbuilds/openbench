@@ -1635,7 +1635,7 @@ def _validate_trial(
     )
     if agent_config_name == "obench.harbor_agents.sandbox_codex:SandboxCodex":
         requested_version = _object(agent_lock.get("kwargs"), f"{location}.lock.agent.kwargs").get("version")
-        if agent_version != requested_version or agent_version not in {"0.154.0", "0.157.0"}:
+        if agent_version != requested_version or agent_version not in {"0.154.0", "0.157.0", "0.162.0"}:
             raise _fail(f"{location}.result.agent_info.version", "does not match pinned sandbox CLI")
     model_info = _object(
         agent_info.get("model_info"), f"{location}.result.agent_info.model_info"
@@ -1651,8 +1651,11 @@ def _validate_trial(
         )
     model = f"{provider}/{model_name}" if provider else model_name
     if (agent_config_name == "obench.harbor_agents.sandbox_codex:SandboxCodex"
-            and model in {"gpt-6-sol", "gpt-6-luna"} and agent_version != "0.157.0"):
-        raise _fail(f"{location}.result.agent_info.version", "GPT-6 Sol/Luna requires pinned sandbox CLI 0.157.0")
+            and model in {"gpt-6-sol", "gpt-6-luna"} and agent_version not in {"0.157.0", "0.162.0"}):
+        raise _fail(f"{location}.result.agent_info.version", "GPT-6 Sol/Luna requires pinned sandbox CLI 0.157.0 or 0.162.0")
+    if (agent_config_name == "obench.harbor_agents.sandbox_codex:SandboxCodex"
+            and model == "gpt-6.1-sol" and agent_version != "0.162.0"):
+        raise _fail(f"{location}.result.agent_info.version", "GPT-6.1 Sol requires pinned sandbox CLI 0.162.0")
     if model != agent_lock.get("model_name"):
         raise _fail(
             f"{location}.result.agent_info.model_info",

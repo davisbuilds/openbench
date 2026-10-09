@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--tag', default='openbench-local/repair-runtime:dev-v3-codex-0.157.0')
+    parser.add_argument('--tag', default='openbench-local/repair-runtime:dev-v3-codex-0.162.0')
     parser.add_argument('--receipt', type=Path, required=True)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='obench-runtime-build-') as d:
@@ -40,7 +40,7 @@ def main():
             result = subprocess.run(['docker', 'run', '--rm', '--network', 'none', '--cap-drop', 'ALL',
                                      '--security-opt', 'no-new-privileges', '--user', '10001:10001',
                                      identity, 'codex', '--version'], check=True, capture_output=True, text=True)
-            if result.stdout.strip() != 'codex-cli 0.157.0':
+            if result.stdout.strip() != 'codex-cli 0.162.0':
                 raise RuntimeError('runtime CLI version differs from treatment')
             subprocess.run(['docker', 'run', '--rm', '--network', 'none', '--cap-drop', 'ALL',
                             '--security-opt', 'no-new-privileges', '--user', '10001:10001',

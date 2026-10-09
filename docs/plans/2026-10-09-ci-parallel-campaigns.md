@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 ---
 
 # CI throughput and two-trial campaigns
@@ -18,13 +18,15 @@ status: in-progress
 
 1. PR #31 splits the measured 24m43s Harbor job into repair, browser and
    concurrency-control runners. Every previous command remains; `sandbox` is
-   an all-lanes aggregate. Codex review reported no major issues. Hosted Actions
-   rejected dispatch as disabled; actual speedup remains unmeasured.
-2. Add capacity-aware suite preparation, exact one/two-trial admission, paired
+   an all-lanes aggregate. Codex review reported no major issues. Actions was re-enabled; all hosted workflows passed. Harbor elapsed time
+   fell to 12m39s. PR #31 merged.
+2. PR #32 added capacity-aware suite preparation, exact one/two-trial admission, paired
    sandbox lifecycle controls, and observed authenticated execution overlap.
    Ordinary harness OAuth concurrency remains unchanged.
-3. Pass offline regressions, review and fresh Mini qualification before using
-   two-trial execution. Preserve failed attempts and all qualification evidence.
+3. Offline regressions, review and fresh Mini qualification passed at
+   `490d7b2`, including observed overlap and six completed HTTP 200 requests.
+   PR #32 merged. Failed attempts and qualification evidence are preserved.
+   The subsequent GPT-6.1 Sol/runtime upgrade requires fresh qualification.
 
 ## Verification and limits
 

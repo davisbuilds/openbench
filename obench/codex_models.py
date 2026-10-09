@@ -5,7 +5,7 @@ is intentionally outside the single-agent benchmark contract. Bare defaults
 match Codex metadata; campaigns should select an explicit effort alias.
 """
 
-SOL_LUNA_DEFAULTS = {"gpt-6-sol": "low", "gpt-6-luna": "medium"}
+SOL_LUNA_DEFAULTS = {"gpt-6.1-sol": "low", "gpt-6-sol": "low", "gpt-6-luna": "medium"}
 CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 SOL_LUNA_PAIRS = {
     **{model: (model, effort) for model, effort in SOL_LUNA_DEFAULTS.items()},

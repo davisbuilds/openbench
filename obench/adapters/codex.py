@@ -716,7 +716,7 @@ def run(
     if not tail:
         tail = combined[-2000:]
 
-    if MODELS.get(model, "").startswith(("gpt-5.6-", "gpt-6-")) and token_usage.get("token_basis") == "vendor_split":
+    if MODELS.get(model, "").startswith(("gpt-5.6-", "gpt-6-", "gpt-6.1-")) and token_usage.get("token_basis") == "vendor_split":
         raw = token_usage.get("usage_raw") or {}
         if not any(k in raw for k in _CACHE_WRITE_FIELDS):
             # GPT-5.6/GPT-6 expose billable cache writes on newer Codex event

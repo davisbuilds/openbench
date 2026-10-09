@@ -63,7 +63,7 @@ class SandboxManifestTests(unittest.TestCase):
         manifest = copy.deepcopy(self.sandbox)
         del manifest["sandbox"]["implementation_sha256"]["obench.codex_models"]
         self.validate(manifest)
-        for model in ('gpt-6-sol-low', 'gpt-6-luna-max'):
+        for model in ('gpt-6.1-sol-high', 'gpt-6-sol-low', 'gpt-6-luna-max'):
             manifest["arms"][0]["canonical_model"] = model
             with self.subTest(model=model), self.assertRaisesRegex(ValueError, "sandbox implementation"):
                 stats._validate_suite_sandbox_policy(manifest)

@@ -42,7 +42,7 @@ From the repository root, with the pinned optional Harbor environment active:
 
 ```sh
 python scripts/local/build_browser_runtime.py --base-image sha256:BASE_IMAGE_ID --receipt results/browser/runtime.json
-python scripts/local/verify_repair_codex.py --runtime-image sha256:BROWSER_IMAGE_ID --task benchmarks/harbor/local/activity-explorer-c1-o1 --model gpt-6-sol-high --project-check 'pnpm build' --output-dir results/browser/workflow
+python scripts/local/verify_repair_codex.py --runtime-image sha256:BROWSER_IMAGE_ID --task benchmarks/harbor/local/activity-explorer-c1-o1 --model gpt-6.1-sol-high --project-check 'pnpm build' --output-dir results/browser/workflow
 python scripts/local/verify_browser_quality.py --image sha256:BROWSER_IMAGE_ID --output results/browser/quality --workflow results/browser/workflow/receipt.json
 python scripts/local/verify_browser_lifecycle.py --runtime-image sha256:BROWSER_IMAGE_ID --output results/browser/lifecycle
 ```

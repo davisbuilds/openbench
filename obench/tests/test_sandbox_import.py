@@ -118,13 +118,13 @@ class SandboxImportTests(unittest.TestCase):
         self.assertEqual(rows[0]['score'], 1.0)
 
     def test_sol_luna_import_require_new_cli_and_preserve_model_identity(self):
-        for model, effort in [('gpt-6-sol', 'low'), ('gpt-6-luna', 'max')]:
-            for version in ('0.154.0', '0.157.0'):
+        for model, effort in [('gpt-6.1-sol', 'high'), ('gpt-6-sol', 'low'), ('gpt-6-luna', 'max')]:
+            for version in ('0.154.0', '0.157.0', '0.162.0'):
                 with self.subTest(model=model, version=version), tempfile.TemporaryDirectory() as directory:
                     self.root = Path(directory)
                     fixture, plan = self.fixture(cli_version=version, model=model, effort=effort)
-                    if version == '0.154.0':
-                        with self.assertRaisesRegex(HarborResultsError, 'GPT-6 Sol/Luna requires'):
+                    if version == '0.154.0' or (model == 'gpt-6.1-sol' and version == '0.157.0'):
+                        with self.assertRaisesRegex(HarborResultsError, 'requires pinned sandbox CLI'):
                             self.import_fixture(fixture, plan)
                     else:
                         rows = self.import_fixture(fixture, plan)

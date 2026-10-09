@@ -88,17 +88,17 @@ class SandboxCodexTests(unittest.TestCase):
                 self.config = kwargs['config']
 
         cls = _build_agent_class(Base)
-        for model in ('gpt-6-sol', 'gpt-6-luna'):
+        for model in ('gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna'):
             for effort in ('low', 'medium', 'high', 'xhigh', 'max'):
                 with self.subTest(model=model, effort=effort):
-                    obj = cls(model_name=model, reasoning_effort=effort, version='0.157.0')
+                    obj = cls(model_name=model, reasoning_effort=effort, version='0.162.0')
                     self.assertEqual(obj.config['service_tier'], 'default')
             for effort in ('none', 'ultra', None):
                 with self.subTest(model=model, effort=effort), self.assertRaisesRegex(ValueError, 'model/effort'):
-                    cls(model_name=model, reasoning_effort=effort, version='0.157.0')
+                    cls(model_name=model, reasoning_effort=effort, version='0.162.0')
         for model, effort in [('gpt-5.6-terra', 'medium'), ('gpt-6-astra', 'max'), ('unknown', 'low')]:
             with self.subTest(model=model), self.assertRaisesRegex(ValueError, 'model/effort'):
-                cls(model_name=model, reasoning_effort=effort, version='0.157.0')
+                cls(model_name=model, reasoning_effort=effort, version='0.162.0')
 
     def test_model_provider_has_only_loopback_transport(self):
         cfg=codex_config()

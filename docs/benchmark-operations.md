@@ -215,3 +215,16 @@ refuse the launch instead of silently changing sealed intent. Prepare a new
 serial suite and qualify that treatment. Concurrency stays fixed during a run;
 this is a launch-time fallback, not dynamic mid-run throttling. Host resource
 checks do not predict provider quota or rate limits.
+
+### Default model lineup for new campaigns
+
+From 2026-10-09, use **GPT-6.1 Sol at high** (`gpt-6.1-sol-high`) for the Sol
+arm in new campaigns, alongside GPT-5.6 Terra xhigh and GPT-6 Luna max. This
+is a campaign default; the bare `gpt-6.1-sol` adapter name follows Codex's low
+effort default. Always seal the explicit effort alias. Existing GPT-6 Sol
+suites and historical results retain their identities.
+
+The isolated runtime now pins Codex 0.162.0. Codex 0.157.0 lacks GPT-6.1 Sol
+metadata and fails its offline tool-loop control. Rebuild the base/browser
+images and qualify the selected models against their new immutable image ID
+before launching. A prior model or image admission cannot authorize this change.
