@@ -17,9 +17,10 @@ let seq=0,busy=false,blob,lastViewport={width:1440,height:900};
 async function api(path,data){const r=await fetch(path,{method:data?'POST':'GET',headers:{Authorization:'Bearer '+token,...(data?{'Content-Type':'application/json'}:{})},body:data?JSON.stringify(data):undefined});const v=await r.json();if(!r.ok)throw Error(v.error||'Review request failed');return v;}
 function option(value,label){const o=document.createElement('option');o.value=value;o.textContent=label;return o;}
 async function render(record){
- seq=record.seq;$('candidate').value=record.selection.candidate;$('fixture').value=record.selection.fixture;lastViewport=record.selection.viewport;
- $('viewport').value=[lastViewport.width,lastViewport.height].join(',');
+ seq=record.seq;
  if(!record.result.ok){$('message').textContent=record.result.error;return;}
+ $('candidate').value=record.selection.candidate;$('fixture').value=record.selection.fixture;lastViewport=record.selection.viewport;
+ $('viewport').value=[lastViewport.width,lastViewport.height].join(',');
  const v=record.result.value;
  const response=await fetch('/'+v.screenshot,{headers:{Authorization:'Bearer '+token}});if(!response.ok)throw Error('Screenshot unavailable');
  if(blob)URL.revokeObjectURL(blob);blob=URL.createObjectURL(await response.blob());$('screen').src=blob;

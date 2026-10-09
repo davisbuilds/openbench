@@ -77,7 +77,10 @@ For example, use the **actual latest** `seq` and control `ref` from `inspect`:
 Do not assume reference 0 is a search field. The next snapshot replaces control
 references. Actions require its latest sequence number; stale requests fail
 before execution. There is no automatic retry of a potentially applied action.
-On an error or lost response, inspect first. To obtain a fresh observation:
+On an error or lost response, inspect first. A failed reset or viewport transition
+ends the session because its active selection is uncertain; evidence records the
+attempted selection without attaching confirmed source/fixture hashes. Start a
+new session to continue. To obtain a fresh observation in a healthy session:
 
 ```json
 {"action":"snapshot"}

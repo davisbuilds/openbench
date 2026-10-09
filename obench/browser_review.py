@@ -265,31 +265,40 @@ class Review:
         if self.seq >= 1000:
             raise ValueError('session action limit; start a new session')
         command = dict(request)
+        selection = dict(self.current)
         if command['action'] == 'reset':
             candidate = command['candidate']
             if candidate not in self.bundle['candidates']:
                 raise ValueError('unknown candidate')
-            self.current = {k: command[k] for k in ('candidate', 'fixture', 'viewport')}
+            selection = {k: command[k] for k in ('candidate', 'fixture', 'viewport')}
             command['files'] = self.bundle['candidates'][candidate]['files']
             command['fixture'] = fixture(command['fixture'])
-        if not self.current:
+        if not selection:
             raise ValueError('reset first')
         if command['action'] == 'viewport':
-            self.current['viewport'] = command['viewport']
+            selection['viewport'] = command['viewport']
         try:
             started = time.monotonic()
             result = self.browser.call(command)
             self.seq += 1
             stem = f'{self.seq:05d}'
             if result.get('ok'):
+                self.current = selection
                 png = base64.b64decode(result['value'].pop('screenshot'), validate=True)
                 save(self.directory / (stem + '.png'), png)
                 result['value']['screenshot'] = stem + '.png'
                 result['value']['screenshot_sha256'] = digest(png)
+            elif command['action'] in ('reset', 'viewport'):
+                # The browser may have applied only part of a state transition.
+                # No subsequent observation can claim a known selection.
+                self.failed = True
+            confirmed = not self.failed
             record = {'schema': SCHEMA, 'seq': self.seq, 'unscored': True, 'request': request,
-                      'selection': dict(self.current), 'bundle_sha256': self.bundle_hash,
-                      'source_sha256': self.bundle['candidates'][self.current['candidate']]['source_sha256'],
-                      'fixture_sha256': digest(encoded(fixture(self.current['fixture']))),
+                      'selection': dict(self.current) if confirmed else None,
+                      'attempted_selection': selection, 'selection_confirmed': confirmed,
+                      'bundle_sha256': self.bundle_hash,
+                      'source_sha256': self.bundle['candidates'][self.current['candidate']]['source_sha256'] if confirmed else None,
+                      'fixture_sha256': digest(encoded(fixture(self.current['fixture']))) if confirmed else None,
                       'image_id': self.browser.image, 'browser_policy_sha256': identity(),
                       'driver_sha256': digest(DRIVER.encode()), 'elapsed_s': round(time.monotonic() - started, 3),
                       'observed_at': time.time(), 'result': result, 'evidence': str(self.directory / (stem + '.json'))}
@@ -405,7 +414,7 @@ def serve(bundle_path, image, directory, port=0, ttl=7200):
                           'viewer': descriptor['url'] + '/#' + token}), flush=True)
         for sig in (signal.SIGINT, signal.SIGTERM):
             previous[sig] = signal.signal(sig, stop_signal)
-        while not stopped and time.time() < descriptor['expires_at']:
+        while not stopped and not review.failed and time.time() < descriptor['expires_at']:
             server.handle_request()
     finally:
         for sig, handler in previous.items():

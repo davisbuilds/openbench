@@ -101,6 +101,37 @@ class ReviewContracts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'stale'):
             r.act({'action': 'click', 'seq': 1, 'ref': 0})
 
+    def test_failed_selection_change_cannot_mislabel_later_observations(self):
+        class FailedBrowser:
+            image = 'synthetic-image'
+            calls = 0
+
+            def call(self, request):
+                self.calls += 1
+                return {'ok': False, 'error': 'context transition timed out'}
+
+        selection = {'candidate': 'A', 'fixture': 'everyday', 'viewport': {'width': 1440, 'height': 900}}
+        bundle = {'candidates': {c: {'files': {}, 'source_sha256': {}} for c in 'AB'}}
+        for action in (
+            {'action': 'reset', 'candidate': 'B', 'fixture': 'stress', 'viewport': {'width': 360, 'height': 800}},
+            {'action': 'viewport', 'viewport': {'width': 360, 'height': 800}},
+        ):
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as tmp:
+                browser = FailedBrowser()
+                review = Review(bundle, 'bundle-hash', Path(tmp), browser)
+                review.current = dict(selection)
+                record = review.act({**action, 'seq': 0})
+                self.assertEqual(review.current, selection)
+                self.assertTrue(review.failed)
+                self.assertIsNone(record['selection'])
+                self.assertFalse(record['selection_confirmed'])
+                self.assertIsNone(record['source_sha256'])
+                self.assertEqual(record['attempted_selection']['viewport']['width'], 360)
+                self.assertTrue(Path(record['evidence']).is_file())
+                with self.assertRaisesRegex(RuntimeError, 'session failed'):
+                    review.act({'action': 'snapshot'})
+                self.assertEqual(browser.calls, 1)
+
     def test_fixture_conditions_are_separate(self):
         everyday, stress = fixture('everyday'), fixture('stress')
         self.assertEqual(len(everyday['data']), 9)
