@@ -71,7 +71,7 @@ async def main():
     parser.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()
     oracle = tomllib.loads((args.task / "task.toml").read_text()).get("metadata", {}).get("openbench_oracle")
-    target = "web/app.js" if oracle == "activity-explorer-v1" else "scripts/profiles/__init__.py"
+    target = "web/app.js" if oracle in ("activity-explorer-v1", "activity-explorer-v2") else "scripts/profiles/__init__.py"
     token = uuid.uuid4().hex[:12]
     network, server = "obench-probe-" + token, "obench-canary-" + token
     receipt = {"schema": 1, "scope": "Harbor environment, offline gateway rejection, and source lifecycle; no model inference",

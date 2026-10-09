@@ -1206,7 +1206,7 @@ def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: fl
         source_hashes = {name: _object(value, location).get("sha256") for name, value in files.items()}
         if not source_hashes or graded.get("source_sha256") != source_hashes:
             raise _fail(location, "graded source differs from the frozen submission")
-    if expected_oracle == 'activity-explorer-v1' and worker is not None:
+    if expected_oracle in ('activity-explorer-v1', 'activity-explorer-v2') and worker is not None:
         from .browser_policy import identity
         if worker.get('browser_policy_sha256') != identity():
             raise _fail(location, 'browser worker policy differs from the admitted policy')
@@ -1214,6 +1214,9 @@ def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: fl
         if (not isinstance(runtime, dict) or runtime.get('sandbox') is not True
                 or runtime.get('playwright') != '1.64.0' or not runtime.get('chromium')):
             raise _fail(location, 'missing sandboxed browser runtime evidence')
+        if expected_oracle == 'activity-explorer-v2' and (
+                runtime.get('observer') != 'cdp-isolated-world-v2' or runtime.get('isolated_world') is not True):
+            raise _fail(location, 'missing isolated browser observer evidence')
     return path
 
 

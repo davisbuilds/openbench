@@ -16,7 +16,7 @@ from obench.browser_review import (Browser, Review, client, encoded, fixture, lo
                                    prepare, validate_action)
 
 
-def trial(root, *, hostile=False):
+def trial(root, *, hostile=False, oracle='activity-explorer-v1'):
     from scripts.ci.browser_quality_fixtures import HTML, JS, CSS
     root = Path(root)
     web = root / 'artifacts/workspace/web'
@@ -37,11 +37,17 @@ fetch('/identity-key.json').then(r=>{document.body.dataset.keyStatus=r.status});
     verifier = root / 'verifier'
     verifier.mkdir()
     (verifier / 'sandbox-grading.json').write_text(json.dumps({'grading': {
-        'oracle_id': 'activity-explorer-v1', 'source_sha256': hashes}}))
+        'oracle_id': oracle, 'source_sha256': hashes}}))
     return root
 
 
 class ReviewContracts(unittest.TestCase):
+    def test_v2_frozen_artifact_is_reviewable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prepare([trial(root/'trial',oracle='activity-explorer-v2')],root/'bundle')
+            self.assertEqual(set(load_bundle(root/'bundle')[0]['candidates']), {'A'})
+
     def test_prepare_freezes_and_checks_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -175,7 +181,7 @@ class ReviewBrowserJourney(unittest.TestCase):
                         'from pathlib import Path; import json; print(json.dumps(dict(allowed=Path("/opt/browser-deps/node_modules/playwright/package.json").is_file(), denied=not Path(' + repr(str(canary)) + ').exists())))'])
                     self.assertEqual(json.loads(read_probe), {'allowed': True, 'denied': True})
                     hidden_probe = subprocess.check_output(['docker', 'exec', descriptor['container'], 'python3', '-c',
-                        "from pathlib import Path; assert not any(Path(p).exists() for p in ['/tests','/solution','/opt/openbench/obench/repair_oracles','/opt/openbench/obench/browser_worker.py','/var/run/docker.sock']); print('hidden-paths-denied')"])
+                        "from pathlib import Path; assert not any(Path(p).exists() for p in ['/tests','/solution','/opt/openbench/obench/repair_oracles','/opt/openbench/obench/browser_worker.py','/opt/openbench/obench/browser_worker_v2.py','/var/run/docker.sock']); print('hidden-paths-denied')"])
                     self.assertEqual(hidden_probe.strip(), b'hidden-paths-denied')
                     # Effective network denial from a subprocess in this same runtime.
                     network = subprocess.check_output(['docker', 'exec', descriptor['container'], 'python3', '-c',

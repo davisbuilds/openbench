@@ -27,8 +27,66 @@ CARD_JS = (CARD_JS.replace('search.oninput=render;status.onchange=render;',
     .removesuffix('load();')+'setTimeout(load,200);')
 CARD_HTML = HTML.replace('<p class="description"></p>', '<div class="description"></div>')
 
+# Independent implementation: a native modal, delegated events, and transformed
+# metadata. It deliberately does not share the list/card interaction functions.
+MODAL_HTML = HTML.replace('<section aria-label="Activity details" hidden>', '<dialog aria-label="Activity details">').replace('</section>', '</dialog>')
+MODAL_JS = '''
+const entries=document.getElementById('list'), message=document.getElementById('state');
+const query=document.querySelector('input'), select=document.querySelector('select');
+const modal=document.querySelector('dialog'), again=document.getElementById('retry');
+let records=[];
+function update(){
+ entries.replaceChildren();
+ for(const record of records){
+  if(!(record.title+' '+record.project).toLowerCase().includes(query.value.toLowerCase()))continue;
+  if(select.value!=='All' && record.status!==select.value.toLowerCase())continue;
+  const row=document.createElement('article'), trigger=document.createElement('button');
+  trigger.className='activity';trigger.textContent=record.title;trigger.dataset.id=record.id;
+  row.append(trigger);entries.append(row);
+ }
+ message.textContent=entries.childElementCount?'':'No activities found';
+}
+entries.addEventListener('click',event=>{
+ const trigger=event.target.closest('button');if(!trigger)return;
+ const record=records.find(value=>String(value.id)===trigger.dataset.id);
+ modal.querySelector('h2').textContent=record.title;
+ modal.querySelector('.metadata').textContent=record.project+' / '+record.status;
+ modal.querySelector('.description').textContent=record.description;modal.showModal();
+});
+document.getElementById('close').addEventListener('click',()=>modal.close());
+query.addEventListener('input',update);select.addEventListener('change',update);
+async function request(){
+ entries.replaceChildren();again.hidden=true;message.textContent='Loading activities';
+ try{const response=await fetch('/api/activities');if(response.status!==200)throw Error();
+  const payload=await response.json();records=payload.activities;update();
+ }catch{message.textContent='Could not load activities';again.hidden=false;}
+}
+again.addEventListener('click',request);request();
+'''
+MODAL_CSS = CSS + '''
+dialog{max-width:min(720px,calc(100vw - 32px));max-height:85vh;overflow-y:auto;overflow-wrap:anywhere;border:1px solid;padding:24px}
+dialog::backdrop{background:#1118}.metadata,.activity{text-transform:uppercase}'''
+CLIPPING = '\n.activity{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+POISON_CLIP = '''
+Object.defineProperty(Element.prototype,'scrollWidth',{get(){return this.clientWidth;}});
+Range.prototype.getClientRects=function(){return [];};
+'''
+POISON_ORDER = '''
+const originalCompare=Node.prototype.compareDocumentPosition;
+Node.prototype.compareDocumentPosition=function(other){const bits=originalCompare.call(this,other);return (bits&~6)|((bits&2)?4:0)|((bits&4)?2:0);};
+'''
+POISON_TEXT = '''
+const originalText=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'innerText');
+Object.defineProperty(HTMLElement.prototype,'innerText',{get(){return this.matches('section')?rows.map(r=>[r.title,r.project,r.status,r.description].join(' ')).join(' '):originalText.get.call(this);},set:originalText.set});
+'''
+POISON_GLOBALS = '''
+window.getComputedStyle=()=>({fontSize:'999px',opacity:'1',visibility:'visible',overflowX:'visible',overflowY:'visible'});
+JSON.stringify=()=>'{"ok":true,"value":{"clipped":false}}';
+Object.defineProperty(Document.prototype,'activeElement',{get(){return document.querySelector('.activity');}});
+'''
 
-def prepare(root):
+
+def prepare(root, *, adversarial=False):
     root=Path(root)
     variants={
         'valid-list':(HTML,JS,CSS),
@@ -45,6 +103,15 @@ def prepare(root):
         'duplicate-record':(HTML,JS.replace('for(const r of filtered)', 'for(const r of [...filtered,...filtered])'),CSS),
         'wide-detail':(HTML,JS,CSS+'\nsection{min-width:900px}'),
     }
+    if adversarial:
+        variants.update({
+            'valid-modal':(MODAL_HTML,MODAL_JS,MODAL_CSS),
+            'valid-poisoned':(HTML,JS+POISON_CLIP+POISON_ORDER+POISON_TEXT+POISON_GLOBALS,CSS),
+            'tampered-clipping':(HTML,JS+POISON_CLIP,CSS+CLIPPING),
+            'tampered-order':(HTML,JS.replace('for(const r of filtered)', 'for(const r of filtered.reverse())')+POISON_ORDER,CSS),
+            'tampered-description':(HTML,JS.replace('textContent=r.description','textContent=r.description.slice(0,30)')+POISON_TEXT,CSS),
+            'tampered-keyboard':(HTML,JS.replace('button.onclick=()=>', 'button.tabIndex=-1;button.onkeydown=e=>e.preventDefault();button.onclick=()=>')+POISON_GLOBALS,CSS),
+        })
     for name,(html,js,css) in variants.items():
         web=root/name/'web';web.mkdir(parents=True,exist_ok=False)
         for file,value in [('index.html',html),('app.js',js),('style.css',css)]:

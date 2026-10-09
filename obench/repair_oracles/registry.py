@@ -19,6 +19,8 @@ class Oracle:
 
 
 ORACLES = {
+    'activity-explorer-v2': Oracle('activity-explorer-v2',
+        'obench.repair_oracles.activity_explorer_v2', 'web/', 'browser-observations-v1'),
     'activity-explorer-v1': Oracle('activity-explorer-v1',
         'obench.repair_oracles.activity_explorer', 'web/', 'browser-observations-v1'),
     'agentmonitor-benchmark-v3': Oracle(
@@ -32,7 +34,8 @@ MODULES = ('obench.sandbox_grading', 'obench.harbor_sandbox', 'obench.repair_wor
            'obench.repair_identity',
            'obench.repair_oracles.registry', 'obench.repair_oracles.agentmonitor',
            'obench.repair_oracles.agentmonitor_v3', 'obench.browser_worker',
-           'obench.browser_policy', 'obench.repair_oracles.activity_explorer')
+           'obench.browser_policy', 'obench.repair_oracles.activity_explorer',
+           'obench.browser_worker_v2', 'obench.repair_oracles.activity_explorer_v2')
 PACKAGE = Path(__file__).resolve().parents[1]
 
 

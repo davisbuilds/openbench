@@ -1,0 +1,1 @@
+{"name":"activity-explorer","private":true,"scripts":{"dev":"node scripts/server.cjs","build":"node scripts/check.cjs"}}

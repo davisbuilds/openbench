@@ -4,33 +4,34 @@ artifacts = [
 ]
 
 [task]
-name = "openbench/dojo-evidence-pr60-c3-o5"
+name = "openbench/activity-explorer-c2-o2"
 version = "1.0.0"
-description = "The profile evidence tools sometimes report a reassuring result that disagrees with the session being inspected."
+description = "Build an accessible responsive activity explorer."
 authors = []
 keywords = ["openbench"]
 
 [metadata]
+openbench_oracle = "activity-explorer-v2"
 origin = "openbench"
 difficulty = "unknown"
 category = "programming"
 tags = ["openbench"]
-openbench_task = "dojo-evidence-pr60-c3-o5"
+openbench_task = "activity-explorer-c2-o2"
 openbench_workspace_kind = "snapshot"
 
 [metadata.openbench_revision]
-case = "dojo-evidence-pr60"
-case_revision = 3
-oracle = "dojo-evidence"
-oracle_revision = 5
+case = "activity-explorer"
+case_revision = 2
+oracle = "activity-explorer"
+oracle_revision = 2
 
 [metadata.openbench_task_content_digest]
-scheme = 3
-sha256 = "1269fd4e46eba450475342a17ec9c3cb7e3534049717c56edee782bdb61592d6"
+scheme = 4
+sha256 = "3c59d5adad4b67263b49611fb9f9a3f931763bd203d1792ced1b231b621b5ed4"
 
 [metadata.openbench_harbor_export]
 schema_version = 1
-base_image = "python:3.12-slim-bookworm@sha256:31c0807da611e2e377a2e9b566ad4eb038ac5a5838cbbbe6f2262259b5dc77a0"
+base_image = "node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553"
 network_mode = "no-network"
 
 [verifier]
@@ -43,7 +44,7 @@ timeout_sec = 1800.0
 build_timeout_sec = 1800.0
 network_mode = "no-network"
 os = "linux"
-cpus = 1
+cpus = 2
 memory_mb = 2048
 storage_mb = 10240
 gpus = 0
