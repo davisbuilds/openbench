@@ -29,6 +29,46 @@ def _json(raw):
     return repair_worker.strict_json(raw)
 
 
+def _browser_request(request):
+    """Validate author-controlled inputs before any candidate operation runs.
+
+The v2 worker addresses records by title and detail/keyboard by the first row.
+Those protocol assumptions are different from arbitrary application test data.
+"""
+    required = {'mode', 'data'}
+    allowed = required | {'viewport', 'query', 'status', 'largeText'}
+    if not required <= request.keys() or not request.keys() <= allowed:
+        raise ValueError('browser request requires mode/data and known optional fields')
+    mode, rows = request['mode'], request['data']
+    if mode not in ('list', 'loading', 'retry', 'detail', 'keyboard', 'layout') or not isinstance(rows, list):
+        raise ValueError('browser request requires a supported mode and data array')
+    ids, titles = set(), set()
+    for row in rows:
+        if (not isinstance(row, dict)
+                or any(not isinstance(row.get(k), str) for k in ('id', 'title', 'project', 'status', 'description'))
+                or not row['id'] or not row['title'].strip()
+                or row['status'] not in ('running', 'completed', 'failed')):
+            raise ValueError('browser request contains an invalid activity record')
+        if row['id'] in ids or row['title'].lower() in titles:
+            raise ValueError('browser request requires unique ids and case-insensitive titles')
+        ids.add(row['id']); titles.add(row['title'].lower())
+    if mode in ('detail', 'keyboard') and not rows:
+        raise ValueError('browser request detail/keyboard requires a first record')
+    if 'query' in request and not isinstance(request['query'], str):
+        raise ValueError('browser request query must be a string')
+    if 'status' in request and request['status'] not in ('Running', 'Completed', 'Failed'):
+        raise ValueError('browser request status must select a supported label; omit for All')
+    if mode in ('detail', 'keyboard', 'layout') and any(k in request for k in ('query', 'status')):
+        raise ValueError('browser request cannot filter records used by detail/keyboard/layout probes')
+    if 'largeText' in request and (type(request['largeText']) is not bool or mode != 'layout'):
+        raise ValueError('browser request largeText must be boolean and requires layout mode')
+    if 'viewport' in request:
+        viewport = request['viewport']
+        if (not isinstance(viewport, dict) or set(viewport) != {'width', 'height'}
+                or any(type(v) is not int or not 1 <= v <= 4096 for v in viewport.values())):
+            raise ValueError('browser request viewport needs integer width/height from 1 through 4096')
+
+
 def _validate(files):
     if not REQUIRED <= files.keys():
         raise ValueError('package requires descriptor, cases, evaluator and solver instruction')
@@ -62,6 +102,7 @@ def _validate(files):
                        for k in ('id', 'bucket')) or case['id'] in ids):
             raise ValueError('invalid or duplicate evaluation case')
         ids.add(case['id'])
+        _browser_request(case['request'])
     # Validate syntax without executing imports or top-level code.
     compile(files['evaluator.py'], '<approved-evaluator>', 'exec')
     files['solver/instruction.md'].decode('utf-8')

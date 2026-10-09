@@ -130,7 +130,7 @@ class PackageTests(unittest.TestCase):
                     package._checks(approved, [{'ok': True}], trust_evaluator=True)
 
     def test_duplicate_case_id_and_non_finite_json_rejected(self):
-        for cases in (b'[{"id":"x","bucket":"a","request":{}},{"id":"x","bucket":"a","request":{}}]',
+        for cases in (b'[{"id":"x","bucket":"a","request":{"mode":"list","data":[]}},{"id":"x","bucket":"a","request":{"mode":"list","data":[]}}]',
                       b'[{"id":"x","bucket":"a","request":{"number":NaN}}]'):
             with self.subTest(cases=cases):
                 files = fixture(); files['cases.json'] = cases
@@ -142,6 +142,46 @@ class PackageTests(unittest.TestCase):
         path, sha = self.archive(files)
         with self.assertRaisesRegex(ValueError, 'exited without completing'):
             package._checks(package.load(path, sha), [{'ok': True}], trust_evaluator=True)
+
+    def test_malformed_backend_request_never_becomes_candidate_miss(self):
+        files = fixture()
+        files['cases.json'] = b'[{"id":"list","bucket":"content","request":{}}]'
+        path, sha = self.archive(files)
+        output = self.root / 'bad-request.json'
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            code = package.main(['replay', str(path), '--sha256', sha, '--trust-evaluator',
+                                 '--image', 'sha256:' + 'a' * 64, '--source', str(self.root / 'absent'),
+                                 '--output', str(output), '--json'])
+        self.assertEqual(code, 2)
+        self.assertIn('browser request', json.loads(stdout.getvalue())['error'])
+        self.assertFalse(output.exists())
+        self.assertEqual(json.loads(Path(str(output) + '.evidence/operation.json').read_text())['status'], 'incomplete')
+
+    def test_backend_request_schema_and_impossible_interactions_fail_at_load(self):
+        row = {'id': 'one', 'title': 'Record', 'project': 'Project', 'status': 'running', 'description': 'Details'}
+        valid = {'mode': 'list', 'data': [row]}
+        for request in ({'data': []}, {'mode': 'list'}, {'mode': 'unknown', 'data': []},
+                        {'mode': 'detail', 'data': []}, {'mode': 'keyboard', 'data': []},
+                        {**valid, 'viewport': {'width': True, 'height': 800}},
+                        {**valid, 'viewport': {'width': -1, 'height': 800}},
+                        {**valid, 'viewport': {'width': 400}}, {**valid, 'query': 7},
+                        {**valid, 'status': 'All'}, {**valid, 'largeText': 'yes'},
+                        {**valid, 'mode': 'layout', 'query': 'hidden'},
+                        {**valid, 'mode': 'detail', 'status': 'Completed'},
+                        {**valid, 'data': [row, {**row, 'id': 'two', 'title': 'RECORD'}]},
+                        {**valid, 'data': [{**row, 'title': None}]},
+                        {**valid, 'veiwport': {'width': 360, 'height': 800}}):
+            with self.subTest(request=request):
+                files = fixture(); files['cases.json'] = json.dumps([{'id': 'x', 'bucket': 'b', 'request': request}]).encode()
+                with self.assertRaisesRegex(ValueError, 'browser request'):
+                    package._validate(files)
+
+    def test_all_public_backend_requests_remain_supported(self):
+        from obench.repair_oracles.activity_explorer import cases
+        files = fixture()
+        files['cases.json'] = json.dumps([{'id': n, 'bucket': b, 'request': r} for n, b, r in cases()]).encode()
+        package._validate(files)
 
     def test_cli_reports_failure_without_false_completion_and_help_is_discoverable(self):
         from obench.cli import main

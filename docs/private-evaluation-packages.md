@@ -44,6 +44,19 @@ is `activity-explorer-v2`: its isolated-world browser observer remains public;
 case inputs and acceptance rules may be private. Ordinary project tests and
 configuration belong in the solver checkout when needed for realistic work.
 
+The browser request requires `mode` (`list`, `loading`, `retry`, `detail`,
+`keyboard`, or `layout`) and a `data` array of records with string `id`, `title`,
+`project`, `status`, and `description` fields. IDs and case-insensitive titles
+must be unique; titles/IDs are nonempty and statuses are `running`, `completed`
+or `failed`. Detail/keyboard modes need at least one record. Optional `query`
+is a string; `status` is `Running`, `Completed` or `Failed` (omit for All).
+Filters are supported only in list/loading/retry modes: the other probes address
+the original records directly. `largeText` is a boolean for layout mode only.
+Optional `viewport` requires integer width/height from 1 through 4096; absent
+viewport uses the worker default. Unknown request keys are rejected. Invalid
+requests fail freeze/load and replay before candidate execution, never as a
+candidate miss. These protocol checks do not replace task-quality controls.
+
 The private `evaluator.py` defines:
 
 ```python
