@@ -27,6 +27,15 @@ class RuntimeAdmissionTests(unittest.TestCase):
         self.compiled=suite_run.compile_suite(suite)
         self.control,self.task=admission.prepare_control(self.compiled,self.root/'control')
 
+    def test_parallel_setting_reaches_auth_scheduler_and_control(self):
+        suite=self.compiled.suite.path
+        suite.write_text(suite.read_text().replace('concurrency = 1','concurrency = 2'))
+        compiled=suite_run.compile_suite(suite)
+        self.assertTrue(all(a.agent.n_concurrent==2 for a in compiled.arms))
+        control,_=admission.prepare_control(compiled,self.root/'parallel-control')
+        self.assertEqual(control.suite.run.concurrency,2)
+        self.assertEqual(control.suite.run.attempts,2) # one model still exercises two simultaneous trials
+
     def test_control_is_separate_bounded_and_resealed(self):
         self.assertNotEqual(self.control.manifest_sha256,self.compiled.manifest_sha256)
         self.assertEqual(self.control.suite.run.timeout_seconds,180)

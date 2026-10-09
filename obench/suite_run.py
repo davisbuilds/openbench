@@ -251,6 +251,9 @@ def compile_suite(
             agent = replace(
                 agent,
                 import_path="obench.harbor_agents.sandbox_codex:SandboxCodex",
+                # This isolated lane never refreshes auth; concurrent returns
+                # atomically copy the same immutable staged input bytes.
+                n_concurrent=min(suite.run.concurrency, 2),
                 kwargs={"version": "0.157.0", "reasoning_effort": REPAIR_MODEL_PAIRS[arm.model][1]},
                 # Credential paths are consumed by the trusted adapter only.
                 # The adapter must never upload them to the solver.

@@ -136,7 +136,7 @@ request budget and end with a misleading rate-limit exception. Preserve the
 failed attempt and qualify again in a fresh evidence directory.
 
 Qualification supports the legacy Dojo, registered AgentMonitor, and activity
-explorer browser lanes with serial execution. Browser tasks select a separate
+explorer browser lanes with one or two concurrent trials. Browser tasks select a separate
 admission profile on the same immutable image: sandboxed Chromium, actual
 before/after image transport for each model, browser quality controls and Harbor
 lifecycle/import checks are mandatory. A repair-only receipt is insufficient.
@@ -182,3 +182,34 @@ The canonical compiler overrides the task's agent timeout with the suite value;
 the task's 30-minute declaration alone does not override the suite's general
 20-minute default. Keep other suites unchanged and preserve existing qualification
 suite files as historical evidence. A prepared pilot suite is not a launch.
+
+## Capacity-aware preparation
+
+Run `obench campaign prepare SUITE --output SELECTED.toml` on the execution host
+before qualification. The output must be a new file beside the input suite so
+relative project paths stay unchanged. It copies the suite, selecting two trials
+when a fresh host/Docker sample meets the thresholds below, otherwise one. It
+writes a private `.capacity.json` sidecar with observations, reasons, and the
+compiled manifest digest. It does not launch anything or overwrite the input.
+
+Two-trial thresholds: at least four host and Docker CPUs; host one-minute load
+and aggregate Docker CPU use at most 75% of their CPU counts; at least 6 GiB
+host available memory, 10 GiB Docker memory headroom and 20 GiB free space on the
+project filesystem. Host memory uses macOS `memory_pressure -Q` or Linux
+`MemAvailable`; Docker headroom subtracts current container usage from its VM
+allocation. Missing/invalid observations select one trial. These conservative
+thresholds are policy, not proof of a performance plateau or a capacity reservation.
+
+Qualify the selected suite. Parallel admission additionally requires a real
+paired-sandbox control: simultaneous isolated writes and continued operation
+after the peer is removed. Authenticated controls must show two overlapping
+agent executions through the canonical Harbor scheduler; a configured `2`
+alone is insufficient. One-model qualifications use two attempts for this check.
+Only the isolated adapter's immutable, non-refreshing OAuth route permits two
+uses; ordinary harness OAuth limits remain unchanged.
+
+Launch and dispatch recheck parallel capacity. If conditions deteriorate, they
+refuse the launch instead of silently changing sealed intent. Prepare a new
+serial suite and qualify that treatment. Concurrency stays fixed during a run;
+this is a launch-time fallback, not dynamic mid-run throttling. Host resource
+checks do not predict provider quota or rate limits.

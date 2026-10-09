@@ -38,6 +38,8 @@ SCRIPTS = (
 )
 
 CONTROLS = (*SCRIPTS, "runtime-sockets")
+PARALLEL_SCRIPT = 'scripts/local/verify_parallel_sandbox.py'
+
 BROWSER_SCRIPTS = ('scripts/local/verify_browser_quality.py',
                    'scripts/ci/browser_quality_fixtures.py',
                    'scripts/local/verify_browser_lifecycle.py')
@@ -52,8 +54,8 @@ def digest(path):
 
 
 def implementation():
-    files = runtime_sources(ROOT, (*SCRIPTS,*BROWSER_SCRIPTS))
-    files += [ROOT/p for p in BROWSER_SCRIPTS]
+    files = runtime_sources(ROOT, (*SCRIPTS,*BROWSER_SCRIPTS,PARALLEL_SCRIPT))
+    files += [ROOT/p for p in (*BROWSER_SCRIPTS,PARALLEL_SCRIPT)]
     files += [ROOT/p for p in SCRIPTS] + [ROOT/'docker/repair-sandbox/Dockerfile', ROOT/'obench/tests/test_sandbox_gateway.py']
     files += list((ROOT/'docker/repair-sandbox/node').glob('*.json'))
     files += [p for p in (ROOT/'docker/browser-runtime').glob('*') if p.is_file()]
@@ -71,8 +73,8 @@ def implementation():
 def fingerprint(compiled, harbor_binary):
     if compiled.suite.sandbox is None:
         raise AdmissionError('runtime admission currently supports repair-v1 suites')
-    if compiled.suite.run.concurrency != 1:
-        raise AdmissionError('repair campaign admission currently supports serial trials')
+    if compiled.suite.run.concurrency not in (1,2):
+        raise AdmissionError('repair campaign admission supports one or two concurrent trials')
     harbor = preflight_harbor_binary(harbor_binary)
     suite_run._verify_sandbox_runtime(compiled, harbor, run_process=subprocess.run)
     image = json.loads(subprocess.check_output(['docker','image','inspect',compiled.suite.sandbox.runtime_image],text=True))[0]
@@ -86,7 +88,7 @@ def fingerprint(compiled, harbor_binary):
             'harbor':{'version':harbor.version,'commit':harbor.git_commit},
             'implementation':implementation(),
             'models':sorted({(arm.arm.model,arm.agent.model_name,arm.agent.kwargs['reasoning_effort']) for arm in compiled.arms}),
-            'concurrency':1,
+            'concurrency':compiled.suite.run.concurrency,
             **({'context_sha256':compiled.suite.sandbox.context_sha256}
                if compiled.suite.sandbox.context_archive else {})}
 
@@ -184,9 +186,17 @@ def validate_admission(path, expected):
     if (treatment.get('sandbox', {}).get('runtime_image') != expected['image']['requested']
             or treatment.get('sandbox', {}).get('context_sha256') != expected.get('context_sha256')
             or sorted({arm['canonical_model'] for arm in treatment['arms']}) != sorted({m[0] for m in expected['models']})
-            or treatment['run']['attempts'] != 1 or treatment['run']['max_retries'] != 0
-            or treatment['run']['concurrency'] != 1 or treatment['run']['timeout_seconds'] != 180):
+            or treatment['run']['attempts'] != (2 if expected.get('concurrency',1)==2 and len(expected['models'])==1 else 1) or treatment['run']['max_retries'] != 0
+            or treatment['run']['concurrency'] != expected.get('concurrency',1) or treatment['run']['timeout_seconds'] != 180):
         raise AdmissionError('authenticated control used another execution treatment')
+    if expected.get('concurrency') == 2:
+        for name in ('parallel.log','parallel/summary.json'):
+            if name not in evidence: raise AdmissionError('missing parallel isolation control')
+        parallel=json.loads((path.parent/'parallel/summary.json').read_text())
+        if (parallel.get('passed') is not True or parallel.get('runtime_image') != expected['image']['requested']
+                or parallel.get('probe_sha256') != expected['implementation'][PARALLEL_SCRIPT]):
+            raise AdmissionError('parallel isolation control is stale or failed')
+        verify_parallel_execution(path.parent/'control', evidence_root=path.parent, evidence=evidence)
     validate_model_controls(path.parent, expected, value.get('model_controls'), evidence)
     if expected.get('execution_profile') == 'browser-v1':
         for name in ('browser-quality.log','browser-quality/summary.json',
@@ -246,6 +256,9 @@ def prepare_control(compiled, directory):
     arms=''.join('[[arms]]\nid = '+json.dumps(arm.arm.id)+'\nharness = "codex"\nprofile = "local-codex"\nmodel = '+json.dumps(arm.arm.model)+'\n\n' for arm in compiled.arms)
     text=text[:start]+arms+text[end:]
     text=re.sub(r'^timeout_seconds = .*$', 'timeout_seconds = 180',text,flags=re.M)
+    text=re.sub(r'^concurrency = .*$', 'concurrency = '+str(compiled.suite.run.concurrency),text,flags=re.M)
+    if compiled.suite.run.concurrency==2 and len(compiled.arms)==1:
+        text=re.sub(r'^attempts = .*$', 'attempts = 2',text,flags=re.M)
     text+='\n[sandbox]\nkind="repair-v1"\nruntime_image='+json.dumps(compiled.suite.sandbox.runtime_image)+'\nmax_requests=20\n'
     if compiled.suite.sandbox.context_archive:
         text+='context_archive='+json.dumps(str(compiled.suite.sandbox.context_archive))+'\n'
@@ -260,7 +273,7 @@ def verify_control(control, task, result_path):
     rows=[json.loads(line) for line in Path(result_path).read_text().splitlines()]
     from .stats import validate_suite_rows
     validate_suite_rows(rows)
-    if len(rows)!=len(control.arms) or any(r.get('completed') is not True or r.get('error') for r in rows):
+    if len(rows)!=len(control.arms)*control.suite.run.attempts or any(r.get('completed') is not True or r.get('error') for r in rows):
         raise AdmissionError('authenticated control did not complete every arm')
     jobs={job.task_set_id:Path(control.config.jobs_dir)/job.artifact.job_name for job in suite_run.plan_jobs(control)}
     for row in rows:
@@ -290,6 +303,33 @@ def verify_control(control, task, result_path):
             if event.get('upstream_status')!=200 or peer.get('port')!=443 or not ipaddress.ip_address(peer.get('ip','')).is_global:
                 raise AdmissionError('authenticated control lacks production upstream evidence')
     return rows
+
+
+def verify_parallel_execution(control_root, *, evidence_root=None, evidence=None):
+    """Require observed overlap, not just a configured scheduler limit."""
+    from datetime import datetime
+    events=[]
+    paths=sorted((Path(control_root)/'.openbench/jobs').glob('*/*/result.json'))
+    for path in paths:
+        if evidence is not None and str(path.relative_to(evidence_root)) not in evidence:
+            raise AdmissionError('parallel trial result is not bound into evidence')
+        try:
+            result=json.loads(path.read_text())
+            interval=result['agent_execution']
+            start=datetime.fromisoformat(interval['started_at'])
+            end=datetime.fromisoformat(interval['finished_at'])
+            if result.get('exception_info') or start.tzinfo is None or end.tzinfo is None or end <= start:
+                raise ValueError('invalid interval')
+        except (KeyError,TypeError,ValueError) as exc:
+            raise AdmissionError('parallel control has incomplete execution evidence') from exc
+        events.extend(((start,1),(end,-1)))
+    active=peak=0
+    for _,delta in sorted(events):
+        active+=delta
+        peak=max(peak,active)
+    if peak!=2:
+        raise AdmissionError('control did not demonstrate exactly two overlapping agent executions')
+    return {'peak_agent_executions':peak,'trial_count':len(paths)}
 
 
 def qualify(compiled, directory, harbor_binary, auth_file):
@@ -348,9 +388,17 @@ def qualify(compiled, directory, harbor_binary, auth_file):
         with (directory/'browser-lifecycle.log').open('x') as log:
             subprocess.run([python,'scripts/local/verify_browser_lifecycle.py','--runtime-image',image,
                             '--output',str(directory/'browser-lifecycle')],cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
+    if before.get('concurrency') == 2:
+        with (directory/'parallel.log').open('x') as log:
+            subprocess.run([python,PARALLEL_SCRIPT,'--runtime-image',image,
+                            '--task',str(browser_task if browser else task),
+                            '--output',str(directory/'parallel')],cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
     validate_model_controls(directory, before, model_records)
     if canonical(before) != canonical(fingerprint(compiled,harbor_binary)):
         raise AdmissionError('runtime changed during offline controls; authentication was not read')
+    if compiled.suite.run.concurrency > 1:
+        from .campaign_resources import require_capacity
+        write_record(directory/'authenticated-capacity.json', require_capacity(compiled))
     control,control_task=prepare_control(compiled,directory/'control')
     write_record(directory/'control-jobs.json', {'schema':1, 'jobs':[str(Path(control.config.jobs_dir)/job.artifact.job_name) for job in suite_run.plan_jobs(control)]})
     # Authentication is read only after all offline controls pass. File bytes
@@ -374,6 +422,8 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     manifest=run_dir/(control.manifest_sha256+'.run.json')
     verified=suite_run.verify_suite_run(manifest)
     verify_control(control,control_task,verified['results_path'])
+    if before.get('concurrency') == 2:
+        verify_parallel_execution(directory/'control')
     after=fingerprint(compiled,harbor_binary)
     if canonical(before)!=canonical(after):
         raise AdmissionError('runtime changed while qualification was running')

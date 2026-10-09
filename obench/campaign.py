@@ -124,6 +124,8 @@ def launch_campaign(suite, *, harbor_binary='harbor', admission=None, quality=()
     source = git_identity()
     compiled = compile_suite(suite)
     jobs = plan_jobs(compiled)
+    from .campaign_resources import require_capacity
+    capacity = require_capacity(compiled) if compiled.suite.sandbox else None
     from . import runtime_admission
     admission_hash = None
     quality_evidence = None
@@ -153,7 +155,7 @@ def launch_campaign(suite, *, harbor_binary='harbor', admission=None, quality=()
         raise CampaignError(f'campaign already has launch intent: {directory}; inspect status and Harbor state before recovery') from None
     (directory / 'execution.lock').touch(mode=0o600)
     launch = {'schema': SCHEMA, 'created_at': stamp(), 'host': socket.gethostname(),
-              'source': source, 'suite': str(compiled.suite.path),
+              'source': source, 'suite': str(compiled.suite.path), 'capacity': capacity,
               'manifest_sha256': compiled.manifest_sha256, 'mode': 'qualify' if qualify else 'run',
               'admission': str(Path(admission).resolve()) if admission else None,
               'admission_sha256': admission_hash,
@@ -193,6 +195,9 @@ def execute(directory):
                 if compiled.manifest_sha256 != launch['manifest_sha256']:
                     raise CampaignError('suite inputs changed since launch')
                 from . import runtime_admission
+                from .campaign_resources import require_capacity
+                if compiled.suite.sandbox and compiled.suite.run.concurrency > 1:
+                    write_record(directory / 'dispatch-capacity.json', require_capacity(compiled))
                 if launch.get('mode') == 'qualify':
                     admission = runtime_admission.qualify(compiled, directory, launch['harbor_binary'], launch['auth_file'])
                     record['admission'] = str(admission)
@@ -208,6 +213,8 @@ def execute(directory):
                         if runtime_admission.digest(admission) != launch['admission_sha256']:
                             raise CampaignError('admission changed after launch')
                         runtime_admission.validate_admission(admission, runtime_admission.fingerprint(compiled, launch['harbor_binary']))
+                    if compiled.suite.sandbox and compiled.suite.run.concurrency > 1:
+                        write_record(directory / 'execution-capacity.json', require_capacity(compiled))
                     result = run_suite(compiled, harbor_binary=launch['harbor_binary'], finalize=True)
                     code = result.returncode
                     if code == 0 and result.run_manifest_path is not None:
@@ -306,6 +313,9 @@ def main(argv=None):
     qualify_parser.add_argument('suite')
     qualify_parser.add_argument('--harbor-binary', default='harbor')
     qualify_parser.add_argument('--auth-file', required=True, help='explicit local Codex OAuth file; read-only temporary staging')
+    prepare_parser = sub.add_parser('prepare', help='freeze two-trial concurrency or serial fallback after a local capacity check; does not launch')
+    prepare_parser.add_argument('suite')
+    prepare_parser.add_argument('--output', type=Path, required=True, help='new suite in the same directory; existing files are never overwritten')
     status = sub.add_parser('status', help='read local supervisor and Harbor evidence')
     status.add_argument('directory')
     execute_parser = sub.add_parser('_execute', help=argparse.SUPPRESS)
@@ -317,6 +327,9 @@ def main(argv=None):
                                         admission=getattr(args,'admission',None), quality=getattr(args,'quality',()), qualify=args.command=='qualify',
                                         auth_file=getattr(args,'auth_file',None))
             print(json.dumps({'directory': str(directory), 'status_command': ['obench','campaign','status',str(directory)]}))
+        elif args.command == 'prepare':
+            from .campaign_resources import prepare
+            print(json.dumps(prepare(args.suite, args.output), indent=2))
         elif args.command == 'status':
             print(json.dumps(campaign_status(args.directory), indent=2, sort_keys=True))
         else:
