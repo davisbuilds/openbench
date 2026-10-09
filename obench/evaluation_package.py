@@ -49,9 +49,12 @@ Those protocol assumptions are different from arbitrary application test data.
                 or not row['id'] or not row['title'].strip()
                 or row['status'] not in ('running', 'completed', 'failed')):
             raise ValueError('browser request contains an invalid activity record')
-        if row['id'] in ids or row['title'].lower() in titles:
+        accessible_title = ' '.join(row['title'].replace('\u200b', '').replace('\u00ad', '').split())
+        if accessible_title != row['title']:
+            raise ValueError('browser request title must use canonical accessible-name whitespace')
+        if row['id'] in ids or accessible_title.lower() in titles:
             raise ValueError('browser request requires unique ids and case-insensitive titles')
-        ids.add(row['id']); titles.add(row['title'].lower())
+        ids.add(row['id']); titles.add(accessible_title.lower())
     if mode in ('detail', 'keyboard') and not rows:
         raise ValueError('browser request detail/keyboard requires a first record')
     if 'query' in request and not isinstance(request['query'], str):

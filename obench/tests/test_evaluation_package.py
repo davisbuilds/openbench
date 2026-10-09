@@ -183,6 +183,16 @@ class PackageTests(unittest.TestCase):
         files['cases.json'] = json.dumps([{'id': n, 'bucket': b, 'request': r} for n, b, r in cases()]).encode()
         package._validate(files)
 
+    def test_browser_titles_must_already_have_canonical_accessible_whitespace(self):
+        row = {'id': 'one', 'title': 'A B', 'project': 'Project', 'status': 'running', 'description': 'Details'}
+        for title in (' Record ', 'A  B', 'A\tB', 'A\nB', 'A\u00a0B', 'A\u200b B', 'A\u00ad B'):
+            with self.subTest(title=title):
+                files = fixture()
+                files['cases.json'] = json.dumps([{'id': 'list', 'bucket': 'content', 'request': {
+                    'mode': 'list', 'data': [row, {**row, 'id': 'two', 'title': title}]}}]).encode()
+                with self.assertRaisesRegex(ValueError, 'accessible'):
+                    package._validate(files)
+
     def test_cli_reports_failure_without_false_completion_and_help_is_discoverable(self):
         from obench.cli import main
         path, sha = self.archive()

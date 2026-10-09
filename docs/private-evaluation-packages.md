@@ -48,7 +48,11 @@ The browser request requires `mode` (`list`, `loading`, `retry`, `detail`,
 `keyboard`, or `layout`) and a `data` array of records with string `id`, `title`,
 `project`, `status`, and `description` fields. IDs and case-insensitive titles
 must be unique; titles/IDs are nonempty and statuses are `running`, `completed`
-or `failed`. Detail/keyboard modes need at least one record. Optional `query`
+or `failed`. Titles must already use canonical accessible-name whitespace:
+single spaces without leading/trailing whitespace, soft hyphens or zero-width
+spaces. The fixed backend uses anchored accessible-name locators; unsupported
+titles are rejected rather than silently changing the evaluation input.
+Detail/keyboard modes need at least one record. Optional `query`
 is a string; `status` is `Running`, `Completed` or `Failed` (omit for All).
 Filters are supported only in list/loading/retry modes: the other probes address
 the original records directly. `largeText` is a boolean for layout mode only.
