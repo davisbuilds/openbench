@@ -10,6 +10,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import uuid
 
 GIB = 1024 ** 3
 
@@ -92,16 +93,32 @@ def require_capacity(compiled):
     return decision
 
 
-def prepare(source, destination):
+def prepare(source, destination=None):
     from .suite_run import compile_suite
     from .campaign import write_record
-    source, destination = Path(source).absolute(), Path(destination).absolute()
-    if source.parent.resolve() != destination.parent.resolve():
-        raise ValueError('prepared suite must be in the same directory to preserve path resolution')
+    source = Path(source).absolute()
+    compiled = compile_suite(source)
+    project = compiled.suite.project_root
+    destination = (Path(destination).absolute() if destination else
+                   project/'.openbench/results/prepared'/('suite-'+uuid.uuid4().hex+'.toml'))
     receipt = destination.with_suffix('.capacity.json')
     if destination.exists() or destination.is_symlink() or receipt.exists() or receipt.is_symlink():
         raise FileExistsError('prepared suite or capacity receipt already exists')
-    compiled = compile_suite(source)
+    # Suite paths resolve from the nearest .openbench ancestor, not from the
+    # suites directory. Keep that project root while using ignored storage.
+    # The parent need not exist yet; determine the .openbench anchor directly.
+    anchors = [p.parent for p in destination.parents if p.name == '.openbench']
+    if not anchors or anchors[0].resolve() != project.resolve():
+        raise ValueError('prepared suite must remain under the same project .openbench directory')
+    owner = subprocess.run(['git','-C',str(project),'rev-parse','--show-toplevel'],
+                           capture_output=True,text=True,timeout=10)
+    if owner.returncode == 0:
+        for path in (destination,receipt):
+            ignored = subprocess.run(['git','-C',owner.stdout.strip(),'check-ignore','-q','--',str(path)],
+                                     capture_output=True,timeout=10)
+            if ignored.returncode != 0:
+                raise ValueError('prepared suite and capacity receipt must use Git-ignored runtime storage')
+    destination.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     decision = decide(sample(compiled.suite.project_root))
     raw = source.read_bytes()
     text = raw.decode()
@@ -117,6 +134,9 @@ def prepare(source, destination):
         stream.write(text)
     try:
         selected = compile_suite(destination)
+        if (selected.suite.project_root != compiled.suite.project_root or selected.suite.task_sets != compiled.suite.task_sets
+                or selected.suite.arms != compiled.suite.arms or selected.config != compiled.config):
+            raise ValueError('prepared suite changed project-relative inputs')
         if source.read_bytes() != raw: raise ValueError('source suite changed during preparation')
         write_record(receipt, {**decision, 'source_suite':str(source),
                      'source_sha256':hashlib.sha256(raw).hexdigest(),

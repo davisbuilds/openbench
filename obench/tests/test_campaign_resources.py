@@ -43,8 +43,7 @@ class CapacityTests(unittest.TestCase):
             evidence=json.loads(Path(result['capacity_receipt']).read_text())
             self.assertEqual(evidence['manifest_sha256'],selected.manifest_sha256)
             with self.assertRaises(FileExistsError): resources.prepare(source,target)
-            with self.assertRaisesRegex(ValueError,'same directory'):
-                resources.prepare(source,Path(tmp)/'other.toml')
+
 
     def test_docker_units_are_bytes_and_invalid_values_fail(self):
         self.assertEqual(resources.memory_bytes('1.5GiB'),int(1.5*resources.GIB))
@@ -71,3 +70,27 @@ class CapacityTests(unittest.TestCase):
             p.write_text(json.dumps({'agent_execution':{'started_at':'2026-10-09T00:00:04Z','finished_at':'2026-10-09T00:00:05Z'}}))
             with self.assertRaisesRegex(AdmissionError,'overlapping'):
                 verify_parallel_execution(root)
+
+    def test_prepare_tracked_suite_keeps_checkout_clean(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            init.init_scaffold(root)
+            (root/'.gitignore').write_text('.openbench/results/\n')
+            def git(*args):
+                return subprocess.check_output(['git','-C',str(root),*args],text=True)
+            git('init','-q')
+            git('add','.openbench','.gitignore')
+            git('-c','commit.gpgsign=false','-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','fixture')
+            source=root/'.openbench/suites/default.toml'
+            with patch.object(resources,'sample',return_value=self.healthy()):
+                report=resources.prepare(source)
+                with self.assertRaisesRegex(ValueError,'ignored'):
+                    resources.prepare(source,source.with_name('unignored.toml'))
+            self.assertEqual(git('status','--porcelain'),'')
+            selected=suite_run.compile_suite(report['suite'])
+            original=suite_run.compile_suite(source)
+            self.assertEqual(selected.suite.task_sets,original.suite.task_sets)
+            self.assertEqual(selected.suite.arms,original.suite.arms)
+            self.assertEqual(selected.config,original.config)
+            self.assertEqual(selected.suite.run.concurrency,2)

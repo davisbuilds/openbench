@@ -315,7 +315,7 @@ def main(argv=None):
     qualify_parser.add_argument('--auth-file', required=True, help='explicit local Codex OAuth file; read-only temporary staging')
     prepare_parser = sub.add_parser('prepare', help='freeze two-trial concurrency or serial fallback after a local capacity check; does not launch')
     prepare_parser.add_argument('suite')
-    prepare_parser.add_argument('--output', type=Path, required=True, help='new suite in the same directory; existing files are never overwritten')
+    prepare_parser.add_argument('--output', type=Path, help='new Git-ignored suite under this project .openbench; defaults to .openbench/results/prepared/')
     status = sub.add_parser('status', help='read local supervisor and Harbor evidence')
     status.add_argument('directory')
     execute_parser = sub.add_parser('_execute', help=argparse.SUPPRESS)

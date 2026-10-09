@@ -185,9 +185,11 @@ suite files as historical evidence. A prepared pilot suite is not a launch.
 
 ## Capacity-aware preparation
 
-Run `obench campaign prepare SUITE --output SELECTED.toml` on the execution host
-before qualification. The output must be a new file beside the input suite so
-relative project paths stay unchanged. It copies the suite, selecting two trials
+Run `obench campaign prepare SUITE` on the execution host before qualification.
+Selections default to `.openbench/results/prepared/` inside the same project,
+preserving relative task/profile paths without dirtying tracked source. An
+explicit `--output` must remain under that project’s `.openbench` directory and
+be Git-ignored when the project belongs to a repository. It copies the suite, selecting two trials
 when a fresh host/Docker sample meets the thresholds below, otherwise one. It
 writes a private `.capacity.json` sidecar with observations, reasons, and the
 compiled manifest digest. It does not launch anything or overwrite the input.
