@@ -20,6 +20,8 @@ results and v1 replay remain available; they are not rewritten as v2 results.
 3. Add independently implemented modal/transformed-text controls and deliberate
    measurement/order/focus/content spoofing controls. Demonstrate the known v1
    false positive and v2 rejection in the same real browser runtime.
+   Retry must be reached through Tab and activated through Enter; pointer-only
+   and keyboard-blocked retry controls must fail while valid layouts pass.
 4. Register activity-explorer-c2-o2, keep c1-o1 historical, quarantine v1 from
    quality admission, and update runtime, import, review and CI consumers.
 5. Retain bucket score compatibility but add per-check failure reasons and a

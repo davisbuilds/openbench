@@ -127,7 +127,15 @@ const results=[];
     }
     if(test.mode==='retry') {
       await page.getByText('Could not load activities',{exact:true}).waitFor();
-      await page.getByRole('button',{name:'Retry',exact:true}).click();
+      value.retryFocused=false;
+      for(let i=0;i<20;i++){
+        await page.keyboard.press('Tab');
+        if(await observer.measure(await observer.one('button','Retry'),el=>el===document.activeElement)){
+          value.retryFocused=true;break;
+        }
+      }
+      if(!value.retryFocused)throw Error('Retry is not keyboard reachable');
+      await page.keyboard.press('Enter');
     }
     if(test.data.length) await recordButton(page,test.data[0].title).waitFor();
     else await page.getByText('No activities found',{exact:true}).waitFor();

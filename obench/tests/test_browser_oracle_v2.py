@@ -40,6 +40,14 @@ class BrowserV2Contracts(unittest.TestCase):
         value['detailClosed'] = False
         self.assertEqual(v2.reasons('keyboard', value, {}), ['details-not-keyboard-closable'])
 
+    def test_retry_requires_keyboard_focus_as_well_as_a_second_request(self):
+        request = next(r for name, _, r in v2.cases() if name == 'retry')
+        value = {'observer': 'cdp-isolated-world-v2', 'titles': [r['title'] for r in request['data']],
+                 'empty': False, 'error': False, 'requests': 2}
+        self.assertIn('retry-not-keyboard-reachable', v2.reasons('retry', value, request))
+        value['retryFocused'] = True
+        self.assertEqual(v2.reasons('retry', value, request), [])
+
     def test_historical_replay_is_inspectable_but_cannot_admit_campaigns(self):
         old = inspect_task(ROOT/'benchmarks/harbor/local/activity-explorer-c1-o1')
         new = inspect_task(ROOT/'benchmarks/harbor/local/activity-explorer-c2-o2')

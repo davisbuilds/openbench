@@ -33,8 +33,11 @@ def reasons(name, value, request):
                 failures.append('missing-detail-' + field)
     if name == 'loading' and value.get('loading') is not True:
         failures.append('missing-loading-state')
-    if name == 'retry' and value.get('requests') != 2:
-        failures.append('incorrect-retry-requests')
+    if name == 'retry':
+        if value.get('retryFocused') is not True:
+            failures.append('retry-not-keyboard-reachable')
+        if value.get('requests') != 2:
+            failures.append('incorrect-retry-requests')
     if request['mode'] == 'layout':
         if value.get('documentWidth', 10**6) > request['viewport']['width'] + 1:
             failures.append('horizontal-overflow')
