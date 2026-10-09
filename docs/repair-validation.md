@@ -5,6 +5,10 @@ specified properties of a task and grader. Neither establishes benchmark
 hardness. Isolated repair campaigns require **both**, plus a workflow probe for
 each exact task/image pair.
 
+For operator-owned hidden inputs and grading code, see
+[private evaluation packages](private-evaluation-packages.md). Their current
+freeze/export/replay interface produces diagnostics only, not campaign admission.
+
 ## Discover and inspect
 
 ```sh

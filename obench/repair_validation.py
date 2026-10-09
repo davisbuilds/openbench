@@ -323,8 +323,13 @@ def _validate_campaign(compiled, paths, *, evidence=None):
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == 'package':
+        from .evaluation_package import main as package_main
+        return package_main(argv[1:])
     parser = argparse.ArgumentParser(prog='obench repair', description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
+    sub.add_parser('package', help='freeze, inspect, export and replay private evaluation packages', add_help=False)
     for action in ('inspect', 'replay', 'validate'):
         p = sub.add_parser(action)
         p.add_argument('task', type=Path)
