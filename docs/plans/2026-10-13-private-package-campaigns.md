@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: implemented
 ---
 
 # Private package campaign integration
@@ -32,3 +32,18 @@ No scored model runs in this delivery.
 
 Public artifacts contain only reusable infrastructure and synthetic controls.
 Private package authoring and deployment evidence remain with their owner.
+
+## Implementation evidence
+
+The interface, canonical consumers, offline controls and CI integration are
+implemented. Local verification passed 2,094 unit tests (14 environment-gated
+skips), all 30 core/imported checker controls, and the synthetic Docker pipeline.
+The latter exercised actual Codex build/edit/browser operations, archive-read
+denial, fresh quality replay, and Harbor reference/malformed/forged-reward
+controls. Review found an executable-mode binding gap; the corrected projection
+check now compares both contents and modes, with a red/green regression.
+
+Execution-host qualification remains a delivery gate. Its receipts and the
+private package's deployment record belong to the operator's private project;
+this public plan does not contain those assets or confer campaign admission.
+No scored model runs are included in this delivery.
