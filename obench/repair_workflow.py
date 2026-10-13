@@ -39,8 +39,13 @@ def validate_workflow(path, info, image, project_check):
                 'workflow_sha256': identity()}
     if not project_check or any(type(value.get(k)) is not type(v) or value[k] != v for k, v in required.items()):
         raise ValueError('workflow evidence is incomplete, stale, or belongs to another task/image/command')
+    if info.get('evaluation_package'):
+        if (value.get('evaluation_package_sha256') != info['evaluation_package']['sha256']
+                or value.get('private_asset_known_present') is not True
+                or value.get('private_asset_probe') != 'direct-symlink-subprocess-v1'):
+            raise ValueError('private workflow lacks actual-harness archive boundary evidence')
     required_files = {'agent/codex.txt', 'agent/developer-workflow.json', 'requests.jsonl', 'gateway.jsonl'}
-    if info.get('revision', {}).get('oracle') == 'activity-explorer':
+    if info.get('browser') or info.get('revision', {}).get('oracle') == 'activity-explorer':
         if value.get('browser_image_received') is not True:
             raise ValueError('browser workflow lacks actual image transport')
         required_files.update(('agent/browser-before.png','agent/browser.png'))

@@ -4,10 +4,10 @@ Keep reusable OpenBench infrastructure public and private evaluation content in
 an operator-owned repository. The public test suite contains synthetic controls
 only. Previously public cases are development material, not unseen holdouts.
 
-This first interface freezes inputs, exports a solver projection and replays
-frozen submissions. **It cannot authorize a campaign or produce an importable
-benchmark result.** Suite/Harbor/admission/import integration is the next slice.
-Do not bypass campaign gates to use these diagnostic scores as benchmark runs.
+Package inspection and replay remain diagnostic. The canonical campaign route
+additionally requires an explicit operator pin, evaluator trust, sealed task,
+actual-harness workflow evidence, fresh quality replay and runtime admission.
+A diagnostic replay report alone cannot authorize a campaign.
 
 ## Layout and authority
 
@@ -145,3 +145,58 @@ Package only approved day-to-day guidance and skills in the separately frozen
 context bundle. Development cases support prompt/harness tuning; cases inspected
 for that purpose must leave the held-out comparison pool. Runtime isolation does
 not establish that a model has never encountered a public task or reference.
+
+
+## Canonical campaign route
+
+Export a sealed Harbor task from the approved solver projection. This operation
+validates syntax and hashes but does not execute the evaluator:
+
+```bash
+obench repair package export-task PRIVATE_PACKAGE.tar --sha256 SHA256 \
+  --destination .openbench/tasks/CASE-c1-o1 --json
+```
+
+Use the descriptor's ID and independent case/oracle revisions for the directory
+name. The generated task uses digest scheme 5; historical schemes stay readable.
+The archive itself must remain outside the task and solver checkout.
+
+The operator's local-only suite supplies all three authorization fields:
+
+```toml
+[sandbox]
+kind = "repair-v1"
+runtime_image = "sha256:REPLACE_WITH_IMAGE_DIGEST"
+evaluation_archive = "REPLACE_WITH_PRIVATE_ARCHIVE_PATH"
+evaluation_sha256 = "REPLACE_WITH_ARCHIVE_DIGEST"
+trust_evaluator = true
+```
+
+Archive paths resolve relative to the project root, like context archives.
+Each selected task must match this package's solver projection and revisions.
+The archive hash and descriptor are sealed into suite intent; its local path
+appears only in execution configuration. Verifier and environment pins must
+agree. The host verifier checks task/package bindings before and after source
+freezing and grading. Candidate code cannot choose a host module or evaluator.
+
+Use the same `--evaluation-archive`, `--evaluation-sha256`, and `--trust-evaluator`
+flags with `obench repair inspect|replay|validate` and the actual-harness workflow
+probe. Repair quality requirements are unchanged: untouched baseline, at least
+two distinct valid implementations, targeted defective controls covering every
+bucket, and a passing project workflow. Admission replays these controls rather
+than trusting saved scores. Package changes invalidate task, workflow, quality
+and runtime evidence.
+
+`obench campaign qualify` tests the actual package through each selected Codex
+model configuration using offline transport, including direct/symlink/subprocess
+reads of a known-present host archive. It also exercises the package's reference,
+malformed-source and forged-reward Harbor lifecycle, followed by the existing
+short authenticated public file-edit controls. These are runtime qualification,
+not benchmark model attempts. This first qualification route requires a
+**development** package with `controls/reference/web/`; use independently
+reviewed held-out content only after its qualification policy is established.
+
+Then use ordinary `obench campaign launch --admission ... --quality ...`.
+No diagnostic command bypasses those gates. Keep archives, detailed check reports,
+transcripts and suite results private. The reusable public CI control is
+`scripts/local/verify_package_campaign.py` and contains only synthetic material.

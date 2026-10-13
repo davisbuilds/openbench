@@ -307,7 +307,7 @@ def _validate_openbench_task_content_digest(
     digest = _object(value, location)
     if set(digest) != {"scheme", "sha256"}:
         raise _fail(location, "expected exactly 'scheme' and 'sha256'")
-    if digest.get("scheme") not in ({2, 3, 4} if allow_sandbox else {2}) or isinstance(digest.get("scheme"), bool):
+    if digest.get("scheme") not in ({2, 3, 4, 5} if allow_sandbox else {2}) or isinstance(digest.get("scheme"), bool):
         raise _fail(f"{location}.scheme", "expected OpenBench digest scheme 2")
     sha256 = digest.get("sha256")
     if (
@@ -1146,7 +1146,7 @@ def _validate_reward(
 def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: float, location: str,
                               *, expected_image: str | None = None,
                               expected_model: str | None = None, expected_effort: str | None = None,
-                              expected_oracle: str | None = None) -> Path:
+                              expected_oracle: str | None = None, expected_package: str | None = None) -> Path:
     """Bind the trusted grader, stopped solver and broker ledger to imported rows."""
     path = trial_dir / "verifier" / "sandbox-grading.json"
     receipt = _object(_read_json(path, location), location)
@@ -1155,7 +1155,17 @@ def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: fl
     binding = _object(receipt.get("task_binding"), location + ".task_binding")
     binding_hash = hashlib.sha256(json.dumps(binding, sort_keys=True, separators=(",", ":"),
                                               allow_nan=False).encode()).hexdigest()
-    scheme = 4 if expected_oracle is not None else 3
+    scheme = 5 if expected_package is not None else 4 if expected_oracle is not None else 3
+    if scheme == 5:
+        identity = binding.get('evaluation_package')
+        if (binding.get('scheme') != 5 or not isinstance(identity, dict)
+                or identity.get('sha256') != expected_package
+                or graded.get('evaluation_package') != identity
+                or graded.get('oracle_id') != 'private-evaluation'
+                or graded.get('protocol') != 'browser-observations-v1'
+                or identity.get('evaluation', {}).get('backend') != 'activity-explorer-v2'):
+            raise _fail(location, 'private evaluation differs from locked operator pin')
+        expected_oracle = 'activity-explorer-v2'  # same protected browser observation contract
     if scheme == 4:
         from .repair_oracles.registry import ORACLES
         oracle = ORACLES.get(expected_oracle)
@@ -1715,10 +1725,22 @@ def _validate_trial(
             agent_config_name == "obench.harbor_agents.sandbox_codex:SandboxCodex"
             and _object(trial_lock.get("environment"), location).get("import_path") == "obench.harbor_sandbox:RepairSandbox"
             and _object(trial_lock.get("verifier"), location).get("import_path") in {
-                "obench.sandbox_grading:RepairVerifier", "obench.repair_grading:RepairVerifier"}
+                "obench.sandbox_grading:RepairVerifier", "obench.repair_grading:RepairVerifier", "obench.package_campaign:PackageVerifier"}
         ))
         if agent_config_name == "obench.harbor_agents.sandbox_codex:SandboxCodex":
             verifier_lock = _object(trial_lock.get("verifier"), location)
+            private = verifier_lock.get('import_path') == 'obench.package_campaign:PackageVerifier'
+            package_sha = None
+            if private:
+                kw = verifier_lock.get('kwargs', {})
+                env_kw = trial_lock['environment'].get('kwargs', {})
+                package_sha = kw.get('evaluation_sha256')
+                if (not isinstance(package_sha, str) or not re.fullmatch('[0-9a-f]{64}', package_sha)
+                        or kw.get('trust_evaluator') is not True
+                        or not isinstance(kw.get('evaluation_archive'), str) or not kw['evaluation_archive']
+                        or any(env_kw.get(k) != kw.get(k) for k in
+                               ('evaluation_archive', 'evaluation_sha256', 'trust_evaluator'))):
+                    raise _fail(location, 'environment and verifier package pins differ')
             registered = verifier_lock.get("import_path") == "obench.repair_grading:RepairVerifier"
             oracle_id = verifier_lock.get("kwargs", {}).get("oracle_id") if registered else None
             if registered and (not isinstance(oracle_id, str) or
@@ -1729,7 +1751,7 @@ def _validate_trial(
                 expected_image=trial_lock["environment"].get("kwargs", {}).get("runtime_image"),
                 expected_model=agent_lock.get("model_name"),
                 expected_effort=agent_lock.get("kwargs", {}).get("reasoning_effort"),
-                expected_oracle=oracle_id,
+                expected_oracle=oracle_id, expected_package=package_sha,
             )
 
     rejected_source = (

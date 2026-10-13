@@ -114,10 +114,13 @@ async def run(args):
     from obench.repair_validation import inspect_task
     from obench.repair_workflow import workflow_command, identity
     receipt['workflow_sha256'] = identity()
-    inspected = inspect_task(args.task)
+    from obench.package_campaign import pin
+    evaluation = pin(getattr(args, 'evaluation_archive', None), getattr(args, 'evaluation_sha256', None),
+                     getattr(args, 'trust_evaluator', False))
+    inspected = inspect_task(args.task, evaluation=evaluation)
     receipt.update(task=str(args.task.resolve()), task_binding=inspected['task_binding'])
     app = args.task / 'environment/app'
-    browser = inspected['revision']['oracle'] == 'activity-explorer'
+    browser = inspected.get('browser') or inspected['revision']['oracle'] == 'activity-explorer'
     registered = 'web/app.js' if browser else 'src/import/benchmark.ts' if (app / 'src').is_dir() else None
     target = registered or 'scripts/profiles/__init__.py'
     prefix = '//' if registered else '#'
@@ -148,6 +151,20 @@ async def run(args):
         program = 'import hashlib,pathlib\n'
         program += 'for p,h in ' + repr(checks) + ':\n assert hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()==h,p\n'
         command += 'python3 -c ' + shlex.quote(program) + '\n'
+    if evaluation:
+        # A known-present positive control on the operator side. Only the path is
+        # sent to the evaluated tool loop; no archive bytes or authoring context.
+        assert hashlib.sha256(evaluation.archive.read_bytes()).hexdigest() == evaluation.sha256
+        probe = "import os,pathlib,subprocess\np=pathlib.Path(" + repr(str(evaluation.archive)) + ")\n"
+        probe += "assert not p.exists(), 'private archive visible'\n"
+        probe += "q=pathlib.Path('/tmp/private-archive-link');q.symlink_to(p)\n"
+        probe += "for f in (p,q):\n try: f.read_bytes()\n except OSError: pass\n else: raise AssertionError('private read succeeded')\n"
+        probe += "assert subprocess.run(['cat',str(p)],capture_output=True).returncode != 0\nq.unlink()\n"
+        command += 'python3 -c ' + shlex.quote(probe) + '\n'
+        receipt['evaluation_package_sha256'] = evaluation.sha256
+        receipt['private_asset_known_present'] = True
+        # Set passed only after the normal workflow's command completion check.
+        receipt['private_asset_probe'] = 'direct-symlink-subprocess-v1'
     encoded_command = base64.b64encode(command.encode()).decode()
     oracle = tomllib.loads((args.task / 'task.toml').read_text()).get('metadata', {}).get('openbench_oracle')
     env = None
@@ -162,6 +179,7 @@ async def run(args):
             environment_name="offline-codex", session_id="offline-codex-" + uuid.uuid4().hex[:12],
             trial_paths=paths, task_env_config=EnvironmentConfig(network_mode="no-network", cpus=1, memory_mb=1024),
             network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK), runtime_image=image, oracle_id=oracle,
+            **(evaluation.kwargs() if evaluation else {}),
             **({'context_archive':str(args.context_archive.resolve()),'context_sha256':args.context_sha256} if captured else {}))
 
         async def fake_start(self, actual_model, actual_effort, *_):
@@ -343,6 +361,9 @@ def main():
     parser.add_argument("--model", choices=sorted(REPAIR_MODEL_PAIRS), default="gpt-5.6-terra-xhigh")
     parser.add_argument('--context-archive', type=Path)
     parser.add_argument('--context-sha256')
+    parser.add_argument('--evaluation-archive', type=Path)
+    parser.add_argument('--evaluation-sha256')
+    parser.add_argument('--trust-evaluator', action='store_true')
     parser.add_argument('--project-check', help='Explicit command for a passing pre-fix public-test subset')
     asyncio.run(run(parser.parse_args()))
 

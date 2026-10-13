@@ -249,7 +249,7 @@ def replay(path, sha256, source, image, *, trust_evaluator=False, timeout=90):
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='obench repair package', description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
-    for action in ('freeze', 'inspect', 'export', 'replay'):
+    for action in ('freeze', 'inspect', 'export', 'export-task', 'replay'):
         p = sub.add_parser(action)
         p.add_argument('input', type=Path, help='authoring directory' if action == 'freeze' else 'frozen archive')
         p.add_argument('--json', action='store_true')
@@ -257,7 +257,7 @@ def main(argv=None):
             p.add_argument('--output', type=Path, required=True)
         else:
             p.add_argument('--sha256', required=True, help='operator-approved archive SHA256')
-        if action == 'export':
+        if action in ('export', 'export-task'):
             p.add_argument('--destination', type=Path, required=True, help='fresh solver projection directory')
         if action == 'replay':
             p.add_argument('--source', type=Path, required=True, help='frozen submission web subtree root')
@@ -271,6 +271,9 @@ def main(argv=None):
             result = {**load(args.output, sha).inspect(), 'status': 'frozen'}
         elif args.action == 'inspect':
             result = load(args.input, args.sha256).inspect()
+        elif args.action == 'export-task':
+            from .package_campaign import export_task
+            result = {**load(args.input, args.sha256).inspect(), **export_task(load(args.input, args.sha256), args.destination), 'status': 'exported'}
         elif args.action == 'export':
             result = export(load(args.input, args.sha256), args.destination)
         else:

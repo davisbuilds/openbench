@@ -82,3 +82,8 @@ Scripts clean their resources in normal and failure paths; the integration job
 also checks for surviving sandbox resources. Hosted runners are ephemeral.
 Captured transcripts and benchmark artifacts remain local-only; CI probes use
 synthetic inputs and do not upload raw artifacts.
+
+The browser lane also runs a wholly synthetic private-package campaign control:
+actual Codex tool execution, archive-read denial, fresh quality admission, and
+Harbor verifier/import checks for valid, malformed and forged-reward submissions.
+No private evaluation assets or credentials enter hosted CI.

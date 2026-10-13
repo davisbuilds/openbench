@@ -282,7 +282,10 @@ def compile_suite(
             try:
                 if metadata.get("openbench_task") != name:
                     raise GradingError("repair task identity differs from selected task")
-                if metadata.get("openbench_oracle") is not None:
+                if suite.sandbox.evaluation is not None or metadata.get('openbench_evaluation') is not None:
+                    from .package_campaign import validate_task_binding as validate_package
+                    validate_package(task_root, metadata.get('openbench_task_content_digest'), suite.sandbox.evaluation)
+                elif metadata.get("openbench_oracle") is not None:
                     oracles.select(metadata)
                     oracles.validate_task_binding(task_root,metadata.get("openbench_task_content_digest"))
                 else:
@@ -349,6 +352,8 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
             f"{compiled.manifest_sha256[:12]}"
         )
         oracle_id = _registered_oracle_id(item) if compiled.suite.sandbox is not None else None
+        evaluation = compiled.suite.sandbox.evaluation if compiled.suite.sandbox else None
+        package_kwargs = evaluation.kwargs() if evaluation else {}
         artifact = build_job_config(
             HarborJobSpec(
                 job_name=job_name,
@@ -367,6 +372,7 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
                     "import_path": "obench.harbor_sandbox:RepairSandbox",
                     "kwargs": {
                         "runtime_image": compiled.suite.sandbox.runtime_image,
+                        **package_kwargs,
                         **({"context_archive": str(compiled.suite.sandbox.context_archive),
                             "context_sha256": compiled.suite.sandbox.context_sha256}
                            if compiled.suite.sandbox.context_archive else {}),
@@ -376,8 +382,8 @@ def plan_jobs(compiled: CompiledSuite) -> tuple[PlannedJob, ...]:
                     },
                 }),
                 verifier=(None if compiled.suite.sandbox is None else {
-                    "import_path": ("obench.repair_grading:RepairVerifier" if oracle_id else "obench.sandbox_grading:RepairVerifier"),
-                    "kwargs": {"worker_image": compiled.suite.sandbox.runtime_image,
+                    "import_path": ("obench.package_campaign:PackageVerifier" if evaluation else "obench.repair_grading:RepairVerifier" if oracle_id else "obench.sandbox_grading:RepairVerifier"),
+                    "kwargs": {"worker_image": compiled.suite.sandbox.runtime_image, **package_kwargs,
                                **({"oracle_id": oracle_id} if oracle_id else {})},
                 }),
             )
@@ -1162,8 +1168,11 @@ def _semantic_manifest(
             "max_requests": suite.sandbox.max_requests,
             "request_timeout_seconds": min(suite.run.timeout_seconds, 3600),
             "implementation_sha256": _sandbox_implementation_hashes(
-                registered=any(_registered_oracle_id(item) for item in task_sets)),
+                registered=any(_registered_oracle_id(item) for item in task_sets), private=bool(suite.sandbox.evaluation)),
         }
+        if suite.sandbox.evaluation:
+            from .package_campaign import metadata
+            value['sandbox']['evaluation_package'] = metadata(suite.sandbox.evaluation.load())
         if suite.sandbox.context_archive:
             from .frozen_context import load_archive
             load_archive(suite.sandbox.context_archive, suite.sandbox.context_sha256, kind='context')
@@ -1178,10 +1187,12 @@ def _registered_oracle_id(item):
     return tomllib.loads(task.read_text()).get("metadata",{}).get("openbench_oracle")
 
 
-def _sandbox_implementation_hashes(*, registered=False) -> dict[str, str]:
+def _sandbox_implementation_hashes(*, registered=False, private=False) -> dict[str, str]:
     package = Path(__file__).resolve().parent
     modules = ("codex_models", "repair_identity", "repair_devtools", "frozen_context", "harbor_sandbox", "sandbox_gateway", "sandbox_grading", "harbor_agents.sandbox_codex")
-    if registered:
+    if private:
+        modules += ("package_campaign", "evaluation_package", "repair_evidence")
+    if registered or private:
         from .repair_oracles.registry import MODULES
         modules=tuple(sorted(set(modules)|{name.removeprefix("obench.") for name in MODULES}))
     return {"obench." + name: hashlib.sha256(

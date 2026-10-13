@@ -110,3 +110,21 @@ class StagedAuthTests(unittest.TestCase):
             with self.assertRaises(RuntimeError): staged_auth_paths(str(source), str(source))
             returned.unlink(); source.chmod(0o644)
             with self.assertRaises(RuntimeError): staged_auth_paths(str(source), str(returned))
+
+class PrivateReceiptTests(SandboxReceiptTests):
+    def test_private_pin_mismatch_and_browser_policy_are_rejected(self):
+        from obench.browser_policy import identity
+        package = {'sha256':'a'*64,'evaluation':{'backend':'activity-explorer-v2'}}
+        self.binding.update(scheme=5,evaluation_package=package)
+        self.digest={'scheme':5,'sha256':hashlib.sha256(json.dumps(self.binding,sort_keys=True,separators=(',',':')).encode()).hexdigest()}
+        self.receipt['grading'].update(evaluation_package=package,oracle_id='private-evaluation',protocol='browser-observations-v1')
+        self.receipt['grading']['worker'].update(browser_policy_sha256=identity(),runtime_dependencies={
+            'sandbox':True,'playwright':'1.64.0','chromium':'pinned','observer':'cdp-isolated-world-v2','isolated_world':True})
+        def check(pin='a'*64):
+            (self.verifier/'sandbox-grading.json').write_text(json.dumps(self.receipt))
+            return _validate_sandbox_receipt(self.root,self.digest,1,'test',expected_package=pin)
+        check()
+        for pin in (None,'b'*64):
+            with self.subTest(pin=pin),self.assertRaises(ValueError):check(pin)
+        self.receipt['grading']['worker']['runtime_dependencies']['isolated_world']=False
+        with self.assertRaisesRegex(ValueError,'isolated browser observer'):check()

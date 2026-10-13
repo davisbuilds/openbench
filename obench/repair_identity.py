@@ -42,6 +42,12 @@ def resolve(metadata):
             or any(type(revision.get(key)) is not int or revision[key] < 1
                    for key in ('case_revision', 'oracle_revision'))):
         raise ValueError('invalid repair revision fields')
+    if revision['oracle'] == 'private-evaluation':
+        if (not re.fullmatch('[a-z][a-z0-9-]{0,63}', revision['case'])
+                or name != task_name(revision) or metadata.get('openbench_oracle') is not None):
+            raise ValueError('invalid private evaluation revision')
+        # Descriptive identity, never permission to load an evaluator.
+        return dict(revision)
     allowed = CASE_ORACLES.get(revision['case'])
     if (allowed is None or revision['oracle'] != allowed[0]
             or revision['oracle_revision'] not in allowed[1]):
@@ -95,6 +101,6 @@ def validate_record(value, name):
         raise ValueError('invalid repair revision record')
     revision = {key: value[key] for key in FIELDS}
     metadata = {'openbench_task': name, 'openbench_revision': revision}
-    if revision['oracle'] != 'dojo-evidence':
+    if revision['oracle'] not in ('dojo-evidence', 'private-evaluation'):
         metadata['openbench_oracle'] = f"{revision['oracle']}-v{revision['oracle_revision']}"
     resolve(metadata)

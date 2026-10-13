@@ -33,7 +33,7 @@ def fingerprint(value):
 
 def _implementation_hashes():
     # The report consumer and producer must agree, including source extraction.
-    files = ['repair_validation.py', 'sandbox_grading.py', 'repair_grading.py',
+    files = ['package_campaign.py', 'evaluation_package.py', 'repair_validation.py', 'sandbox_grading.py', 'repair_grading.py',
              'repair_worker.py', 'repair_identity.py', 'harbor_sandbox.py', 'repair_evidence.py', 'repair_workflow.py']
     files += [str(p.relative_to(ROOT / 'obench')) for p in (ROOT / 'obench/repair_oracles').glob('*.py')]
     return {name: sha(ROOT / 'obench' / name) for name in sorted(files)}
@@ -49,10 +49,23 @@ def implementation():
     return current
 
 
-def inspect_task(task):
+def inspect_task(task, *, evaluation=None):
     task = Path(task).resolve()
     metadata = tomllib.loads((task / 'task.toml').read_text())['metadata']
     revision = repair_identity.resolve(metadata)
+    if evaluation is not None or metadata.get('openbench_evaluation') is not None:
+        from . import package_campaign
+        manifest = package_campaign.validate_task_binding(task, metadata['openbench_task_content_digest'], evaluation)
+        package = evaluation.load()
+        checks = [{'id': c['id'], 'bucket': c['bucket']} for c in package.cases]
+        return {'schema': 1, 'kind': 'repair-task-inspection', 'task': str(task),
+                'task_binding': metadata['openbench_task_content_digest'],
+                'revision': repair_identity.record(manifest), 'source_prefix': 'web',
+                'checks': checks, 'buckets': sorted({c['bucket'] for c in checks}),
+                'quality_eligible': True, 'browser': True,
+                'evaluation_package': package_campaign.metadata(package),
+                'limitations': ['controls do not establish held-out difficulty'],
+                'next': 'obench repair validate with explicit evaluation pin and trust'}
     validate = registry.validate_task_binding if metadata.get('openbench_oracle') else legacy.validate_task_binding
     manifest = validate(task, metadata['openbench_task_content_digest'])
     if metadata.get('openbench_oracle'):
@@ -101,8 +114,8 @@ def source_hashes(source, info):
     return {name: hashlib.sha256(data).hexdigest() for name, data in source_files(source, info).items()}
 
 
-def replay(task, source, image):
-    info = inspect_task(task)
+def replay(task, source, image, *, evaluation=None):
+    info = inspect_task(task, evaluation=evaluation)
     validate_image(image)
     files = source_files(source, info)
     with tempfile.TemporaryDirectory(prefix='obench-replay-') as tmp:
@@ -110,7 +123,10 @@ def replay(task, source, image):
             p = Path(tmp) / name
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(data)
-        if info['revision']['oracle'] == 'dojo-evidence':
+        if evaluation is not None:
+            from .package_campaign import grade_submission
+            graded = grade_submission(tmp, evaluation, image)
+        elif info['revision']['oracle'] == 'dojo-evidence':
             graded = legacy.grade_submission(tmp, set(files), image, timeout=90,
                                             oracle_version=info['revision']['oracle_revision'])
         else:
@@ -127,7 +143,7 @@ def replay(task, source, image):
               'scope': 'offline artifact replay; no model attempt; original results unchanged'}
     if graded.get('source_sha256') is not None and graded['source_sha256'] != result['source_sha256']:
         raise ValueError('source changed during replay')
-    if inspect_task(task) != info:
+    if inspect_task(task, evaluation=evaluation) != info:
         raise ValueError('task changed during replay')
     return result
 
@@ -188,8 +204,8 @@ def assess_controls(records, info):
 
 
 
-def validate(task, controls, image, workflow, *, evidence=None):
-    info = inspect_task(task)
+def validate(task, controls, image, workflow, *, evidence=None, evaluation=None):
+    info = inspect_task(task, evaluation=evaluation)
     controls = Path(controls).resolve()
     raw = controls.read_bytes()
     spec = json.loads(raw)
@@ -216,7 +232,7 @@ def validate(task, controls, image, workflow, *, evidence=None):
         if control['role'] == 'baseline' and source != baseline:
             raise ValueError('baseline must be the task environment/app, not a substitute')
         with evidence.stage('control:' + control['id']) if evidence else nullcontext():
-            record = {**control, 'source': str(source), 'result': replay(task, source, image)}
+            record = {**control, 'source': str(source), 'result': replay(task, source, image, **({'evaluation': evaluation} if evaluation else {}))}
             if evidence:
                 evidence.artifact('control', record)
             records.append(record)
@@ -231,16 +247,16 @@ def validate(task, controls, image, workflow, *, evidence=None):
             'scope': 'declared repair controls only; workflow admission and difficulty calibration are separate'}
 
 
-def validate_receipt(path, task, image, *, evidence=None):
+def validate_receipt(path, task, image, *, evidence=None, evaluation=None):
     try:
-        return _validate_receipt(path, task, image, evidence=evidence)
+        return _validate_receipt(path, task, image, evidence=evidence, evaluation=evaluation)
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError('malformed repair quality receipt') from exc
 
 
-def _validate_receipt(path, task, image, *, evidence=None):
+def _validate_receipt(path, task, image, *, evidence=None, evaluation=None):
     value = json.loads(Path(path).read_text())
-    info = inspect_task(task)
+    info = inspect_task(task, evaluation=evaluation)
     if (value.get('schema') != 1 or value.get('kind') != 'repair-quality'
             or value.get('status') != 'passed' or value.get('task') != info
             or value.get('image') != image or value.get('implementation') != implementation()
@@ -260,7 +276,7 @@ def _validate_receipt(path, task, image, *, evidence=None):
     # Hashing source bytes cannot authenticate claims about their behavior.
     # Reconstruct controls from the bound specification and use the production
     # confined grader again; saved pass/score fields never authorize dispatch.
-    fresh = validate(task, value['controls_path'], image, workflow['path'], evidence=evidence)
+    fresh = validate(task, value['controls_path'], image, workflow['path'], evidence=evidence, **({'evaluation': evaluation} if evaluation else {}))
     if evidence:
         evidence.artifact('recomputed', fresh)
     if fresh['status'] != 'passed':
@@ -317,7 +333,8 @@ def _validate_campaign(compiled, paths, *, evidence=None):
     reports = []
     for task in tasks:
         with evidence.stage('task:' + str(task)) if evidence else nullcontext():
-            result = validate_receipt(by_task[task.resolve()], task, compiled.suite.sandbox.runtime_image, evidence=evidence)
+            result = validate_receipt(by_task[task.resolve()], task, compiled.suite.sandbox.runtime_image, evidence=evidence,
+                                      **({'evaluation': compiled.suite.sandbox.evaluation} if getattr(compiled.suite.sandbox, 'evaluation', None) else {}))
             reports.append(result)
     return {'schema': 1, 'kind': 'repair-campaign-admission', 'status': 'passed', 'tasks': reports}
 
@@ -333,6 +350,9 @@ def main(argv=None):
     for action in ('inspect', 'replay', 'validate'):
         p = sub.add_parser(action)
         p.add_argument('task', type=Path)
+        p.add_argument('--evaluation-archive', type=Path)
+        p.add_argument('--evaluation-sha256')
+        p.add_argument('--trust-evaluator', action='store_true')
         p.add_argument('--json', action='store_true', help='one structured operator report on stdout')
         if action != 'inspect':
             p.add_argument('--image', required=True, help='immutable sha256 runtime identity')
@@ -351,15 +371,17 @@ def main(argv=None):
         if getattr(args, 'output', None) and args.output.exists():
             raise ValueError('output exists; choose a fresh evidence path')
         from .repair_evidence import Operation, status, write_json
+        from .package_campaign import pin
+        evaluation = pin(getattr(args, 'evaluation_archive', None), getattr(args, 'evaluation_sha256', None), getattr(args, 'trust_evaluator', False))
         def run(evidence=None):
             if args.action == 'status':
                 return status(args.directory)
             if args.action == 'inspect':
-                return inspect_task(args.task)
+                return inspect_task(args.task, evaluation=evaluation)
             if args.action == 'replay':
                 with evidence.stage('replay') if evidence else nullcontext():
-                    return replay(args.task, args.source, args.image)
-            return validate(args.task, args.controls, args.image, args.workflow, evidence=evidence)
+                    return replay(args.task, args.source, args.image, evaluation=evaluation)
+            return validate(args.task, args.controls, args.image, args.workflow, evidence=evidence, evaluation=evaluation)
         directory = getattr(args, 'evidence_dir', None)
         if directory is None and getattr(args, 'output', None):
             directory = Path(str(args.output) + '.evidence')
