@@ -100,3 +100,17 @@ class CampaignPackageTests(unittest.TestCase):
         self.assertEqual(info['evaluation_package']['sha256'],self.sha)
         self.assertEqual(info['checks'],[{'id':'list','bucket':'content'}])
         self.assertTrue(info['browser'])
+
+    def test_resealing_cannot_change_approved_solver_permissions(self):
+        for relative in ('instruction.md', 'environment/app/web/index.html'):
+            with self.subTest(relative=relative):
+                path=self.task/relative
+                previous=path.stat().st_mode & 0o777
+                path.chmod(previous ^ 0o111)
+                try:
+                    # Recomputing a task seal is not authority to change its
+                    # package-approved execution environment.
+                    with self.assertRaisesRegex(ValueError, 'projection'):
+                        package_campaign.task_manifest(self.task,self.auth)
+                finally:
+                    path.chmod(previous)

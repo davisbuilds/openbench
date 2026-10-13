@@ -81,7 +81,13 @@ def task_manifest(root, authorization):
                     for n, b in package.archive.files.items() if n.startswith('solver/workspace/')})
     actual = {n: h for n, h in manifest['task_files_sha256'].items()
               if n == 'instruction.md' or n.startswith('environment/app/')}
-    if actual != {n: hashlib.sha256(b).hexdigest() for n, b in expected.items()}:
+    approved_modes = {}
+    for name in expected:
+        source = 'solver/instruction.md' if name == 'instruction.md' else 'solver/workspace/' + name.removeprefix('environment/app/')
+        approved_modes[name] = package.archive.manifest['files'][source]['mode']
+    actual_modes = {name: manifest['task_files_mode'][name] for name in actual}
+    if (actual != {n: hashlib.sha256(b).hexdigest() for n, b in expected.items()}
+            or actual_modes != approved_modes):
         raise GradingError('task solver projection differs from approved package')
     manifest.update(scheme=5, schema='openbench-private-evaluation-task-v1',
                     evaluation_package=metadata(package), implementation_sha256=implementation())
@@ -115,7 +121,7 @@ def export_task(package, destination):
                   for n, b in package.archive.files.items() if n.startswith('solver/workspace/')})
     write_files(destination, files)
     for n in files:
-        src = 'solver/workspace/' + n.removeprefix('environment/app/')
+        src = 'solver/instruction.md' if n == 'instruction.md' else 'solver/workspace/' + n.removeprefix('environment/app/')
         mode = package.archive.manifest['files'].get(src, {}).get('mode', 0o644)
         (destination / n).chmod(mode)
     q = json.dumps
