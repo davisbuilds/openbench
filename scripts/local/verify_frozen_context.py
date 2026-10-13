@@ -19,8 +19,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     output = args.output.resolve()
-    if not output.is_relative_to(ROOT / 'results'):
-        raise ValueError('output must be under ignored results')
+    if output.is_relative_to(ROOT.resolve()) and not output.is_relative_to((ROOT / 'results').resolve()):
+        raise ValueError('framework-local output must be under ignored results')
     output.mkdir(parents=True, exist_ok=False)
     source = output / 'context'
     skill = source / 'codex/skills/offline-check'

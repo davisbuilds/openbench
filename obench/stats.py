@@ -1124,7 +1124,7 @@ def _validate_suite_sandbox_policy(manifest):
         raise ValueError("suite manifest sandbox requires local_only publication")
     required = {"kind", "runtime_image", "max_requests", "implementation_sha256"}
     if (not isinstance(policy, dict) or not required <= set(policy)
-            or set(policy) - required - {"request_timeout_seconds", "context_sha256"}):
+            or set(policy) - required - {"request_timeout_seconds", "context_sha256", "evaluation_package"}):
         raise ValueError("suite manifest sandbox policy fields are invalid")
     if 'context_sha256' in policy and not _sha256_hex(policy['context_sha256']):
         raise ValueError('suite context digest is invalid')
@@ -1183,8 +1183,30 @@ def _validate_suite_sandbox_policy(manifest):
     browser_v2 = {'obench.browser_worker_v2', 'obench.repair_oracles.activity_explorer_v2'}
     accepted += tuple(modules | browser_v2 for modules in accepted
                       if 'obench.repair_oracles.activity_explorer' in modules)
+    private_modules = {'obench.package_campaign', 'obench.evaluation_package', 'obench.repair_evidence'}
+    if 'evaluation_package' in policy:
+        identity = policy['evaluation_package']
+        if (not isinstance(identity, dict) or set(identity) != {'sha256', 'evaluation'}
+                or not _sha256_hex(identity['sha256'])):
+            raise ValueError('suite private package identity is invalid')
+        descriptor = identity['evaluation']
+        if (not isinstance(descriptor, dict) or set(descriptor) !=
+                {'schema','id','case_revision','oracle_revision','split','backend'}
+                or type(descriptor.get('schema')) is not int or descriptor['schema'] != 1
+                or descriptor.get('split') not in ('development','holdout')
+                or descriptor.get('backend') != 'activity-explorer-v2'):
+            raise ValueError('suite private descriptor is invalid')
+        accepted = tuple(modules | private_modules for modules in accepted if browser_v2 <= modules)
     for task_set in manifest.get('task_sets', []):
         revision = task_set.get('repair_revision') or {}
+        if revision.get('oracle') == 'private-evaluation':
+            descriptor = policy.get('evaluation_package', {}).get('evaluation', {})
+            if (descriptor.get('id') != revision.get('case')
+                    or any(type(descriptor.get(k)) is not int or descriptor[k] != revision.get(k)
+                           for k in ('case_revision','oracle_revision'))):
+                raise ValueError('suite private task revision differs from package')
+        elif 'evaluation_package' in policy:
+            raise ValueError('private suite contains a task outside the pinned package')
         if (revision.get('oracle') == 'activity-explorer' and revision.get('oracle_revision') == 2
                 and (not isinstance(hashes, dict) or not browser_v2 <= hashes.keys())):
             raise ValueError('suite browser v2 observer implementation is not sealed')

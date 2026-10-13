@@ -22,66 +22,19 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
-### Revise UI acceptance and score interpretation before another pilot
+### Calibrate UI score interpretation and replay historical submissions
 
-- **What**: Accept equivalent accessible detail presentations and cosmetic text
-  transformations; separate strict task completion from diagnostic severity.
-- **Evidence**: The first pilot's artifact audit reproduced a labeled modal
-  rejected by a region-only locator, uppercase project text rejected by a
-  case-sensitive predicate, and genuinely undersized 21.6px activity buttons
-  against the declared 24px minimum. One presentation choice affected three
-  all-or-nothing buckets. A low bucket score is not the fraction of implemented
-  functionality. Earlier browser controls also exposed status/paragraph,
-  metadata-button and asynchronous-filter false negatives.
-- **Next**: Create a new oracle revision accepting region or dialog and verifying
-  content independently of CSS capitalization. If the prompt's region requirement
-  is relaxed, advance the case revision too. Add independently implemented modal
-  and transformed-text positive controls, plus missing-content, broken focus,
-  clipping and undersized-target negatives. Report per-check outcomes, severity
-  and shared failure causes alongside strict pass rate; calibrate aggregation
-  before declaring a replacement headline score. Do not invent severity weights
-  solely to change the current model ranking.
-- **Historical evidence**: Preserve original scores. Replay frozen submissions
-  under the separately identified corrected oracle and distinguish those results
-  from new model attempts. Audit earlier tasks individually rather than applying
-  UI-specific score adjustments to PR repairs. Interactive review is documented
-  in [browser review](../browser-review.md); it never writes benchmark rewards.
-
-### Browser observation integrity blocks further scored UI runs
-
-- **What**: Candidate JavaScript can tamper with main-world DOM measurement APIs
-  used by the browser grader. Hiding the oracle alone does not protect verdicts.
-- **Evidence**: An offline October 2026 controlled probe scored an accepted list
-  at 1.00, the same list with deliberately clipped titles at 0.75, and the clipped
-  list with overridden width/text-range measurements at 1.00. This establishes a
-  grader bypass, not evidence of cheating by any pilot model.
-- **Next**: Move observations out of the candidate JavaScript world and use
-  browser-owned geometry/accessibility where possible. Prove the corrected
-  runtime still observes valid behavior and rejects the demonstrated tampering,
-  plus forged observations and oracle/reward access. Ship a versioned oracle;
-  retain the old implementation for explicitly labeled historical replay.
-- **Gate**: No further scored UI runs until these controls pass. Diagnostic
-  review remains useful, with screenshots and candidate-derived text clearly
-  distinguished from authoritative measurements.
-- **Coverage afterward**: Add independently implemented modal/detail controls,
-  close/retry keyboard navigation, focus visibility and accessibility checks.
-  Keep visual preference separate from functional correctness.
-- **Confidentiality boundary**: Runtime isolation cannot establish ignorance of
-  publicly published grader code. Scored holdout inputs and task-specific rules
-  belong in operator-owned private packages; reusable infrastructure and
-  synthetic controls remain public. See [the package contract](../private-evaluation-packages.md).
-
-### Admit private evaluation packages through the canonical campaign route
-
-- **What**: Package freeze/export/replay is diagnostic only. It does not register
-  private evaluators with campaign launch or issue quality receipts.
-- **Why**: An operator-selected evaluator pin must agree across suite intent,
-  Harbor environment/verifier kwargs, task/workflow/runtime identity, fresh
-  quality replay and sealed result import. Task metadata cannot confer host-code
-  authority. A successful offline package control does not prove those bindings.
-- **Next**: Follow [the integration slice](../plans/2026-10-09-private-evaluation-packages.md),
-  preserving separate authoring and solver contexts and proving actual-harness
-  private-asset denial before any scored run. Retain historical result readers.
+- **What**: Keep strict completion, per-check diagnostics and blind design
+  preference separate; bucket scores are not percentages of implemented features.
+- **Evidence**: The corrected browser oracle now accepts equivalent accessible
+  detail presentations and cosmetic casing, protects measurements from page-world
+  overrides, and tests keyboard Retry. Multiple valid layouts and adversarial
+  controls pass their expected polarity. This establishes grader behavior, not
+  frontier difficulty or design taste.
+- **Next**: Replay frozen pilot submissions under the corrected oracle as
+  separately identified diagnostics. Preserve original scores and distinguish
+  regrading from fresh attempts. Calibrate any replacement aggregate against
+  independently reviewed defects rather than a desired model ranking.
 
 ### Repair benchmark calibration
 

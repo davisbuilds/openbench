@@ -248,3 +248,6 @@ admission. Replaying a saved UI under v2 produces separate diagnostic evidence;
 it does not overwrite its original score or constitute a new model attempt.
 Private scored holdout packaging remains a separate decision. Public synthetic
 calibration tasks cannot be treated as secret evaluations.
+
+Private package-backed tasks use the same workflow and quality requirements, with
+an explicit operator archive/hash/trust pin. See [private package campaigns](private-evaluation-packages.md#canonical-campaign-route).

@@ -89,6 +89,7 @@ class RepairSandboxPolicy:
     max_requests: int = 200
     context_archive: Path | None = None
     context_sha256: str | None = None
+    evaluation: Any = None
 
 
 @dataclass(frozen=True)
@@ -181,7 +182,7 @@ def _parse_sandbox(value: Any, root: Path | None = None) -> RepairSandboxPolicy 
     if value is None:
         return None
     table = _expect_table(value, "sandbox")
-    _expect_keys(table, {"kind", "runtime_image", "max_requests", "context_archive", "context_sha256"}, "sandbox",
+    _expect_keys(table, {"kind", "runtime_image", "max_requests", "context_archive", "context_sha256", "evaluation_archive", "evaluation_sha256", "trust_evaluator"}, "sandbox",
                  required={"kind", "runtime_image"})
     if table["kind"] != "repair-v1":
         raise SuiteError("sandbox.kind must be repair-v1")
@@ -202,7 +203,15 @@ def _parse_sandbox(value: Any, root: Path | None = None) -> RepairSandboxPolicy 
             load_archive(archive, digest, kind='context')
         except (ValueError, OSError) as exc:
             raise SuiteError('invalid pinned context archive: ' + str(exc)) from exc
-    return RepairSandboxPolicy("repair-v1", image, limit, archive, digest)
+    from .package_campaign import pin
+    evaluation_path = table.get('evaluation_archive')
+    if evaluation_path is not None:
+        evaluation_path = (root or Path.cwd()) / _string(evaluation_path, 'sandbox.evaluation_archive')
+    try:
+        evaluation = pin(evaluation_path, table.get('evaluation_sha256'), table.get('trust_evaluator', False))
+    except (ValueError, OSError) as exc:
+        raise SuiteError(str(exc)) from exc
+    return RepairSandboxPolicy("repair-v1", image, limit, archive, digest, evaluation)
 
 
 def _project_root(

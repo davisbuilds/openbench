@@ -376,6 +376,7 @@ def _build_environment_class(DockerEnvironment, EnvironmentCapabilities, Network
         def __init__(self, *args, runtime_image: str, max_requests: int = 200,
                      source_paths: list[str] | None = None, oracle_id: str | None = None,
                      context_archive: str | None = None, context_sha256: str | None = None,
+                     evaluation_archive=None, evaluation_sha256=None, trust_evaluator=False,
                      request_timeout_seconds: float = 1200, **kwargs):
             self.runtime_image = validate_image(runtime_image)
             if (context_archive is None) != (context_sha256 is None):
@@ -424,11 +425,28 @@ def _build_environment_class(DockerEnvironment, EnvironmentCapabilities, Network
                     raise SandboxError("unapproved host mount")
             kwargs["mounts"] = []
             super().__init__(*args, **kwargs)
+            import tomllib
+            task_config_path = self.environment_dir.parent / 'task.toml'
+            task_metadata = tomllib.loads(task_config_path.read_text()).get('metadata', {}) if task_config_path.exists() else {}
+            if task_metadata.get('openbench_evaluation') is not None and evaluation_archive is None:
+                raise SandboxError('private task requires operator evaluation pin')
             self._seed_files = read_tree(self.environment_dir / "app")
             self._seed_modes = {name: (self.environment_dir / 'app' / name).stat().st_mode
                                 for name in self._seed_files}
             self._oracle = None
-            if oracle_id is not None:
+            from .package_campaign import pin, validate_task_binding as validate_package
+            evaluation = pin(evaluation_archive, evaluation_sha256, trust_evaluator)
+            if evaluation is not None:
+                from .repair_oracles.registry import ORACLES, source_names
+                import tomllib
+                if oracle_id is not None or source_paths is not None:
+                    raise SandboxError('private source policy cannot be overridden')
+                task_root = self.environment_dir.parent
+                metadata = tomllib.loads((task_root / 'task.toml').read_text())['metadata']
+                validate_package(task_root, metadata.get('openbench_task_content_digest'), evaluation)
+                self._oracle = ORACLES[evaluation.load().descriptor['backend']]
+                self._source_paths = source_names(self._oracle, self._seed_files)
+            elif oracle_id is not None:
                 from .repair_oracles.registry import select, source_names, validate_task_binding
                 import tomllib
                 task_root = self.environment_dir.parent

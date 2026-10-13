@@ -188,6 +188,11 @@ jobs:
         run: >-
           .venv/bin/python scripts/local/verify_browser_lifecycle.py
           --runtime-image "$OBENCH_BROWSER_IMAGE" --output results/ci/browser-lifecycle
+      - name: Check pinned package admission and Harbor results
+        if: matrix.lane == 'browser'
+        run: >-
+          .venv/bin/python scripts/local/verify_package_campaign.py
+          --image "$OBENCH_BROWSER_IMAGE" --output results/ci/package-campaign
       - name: Retain synthetic quality coverage summary
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -197,6 +202,7 @@ jobs:
             results/ci/repair-quality/summary.json
             results/ci/browser-quality/summary.json
             results/ci/browser-lifecycle/summary.json
+            results/ci/package-campaign/summary.json
             results/ci/am123-oracle/summary.json
           if-no-files-found: error
           retention-days: 14

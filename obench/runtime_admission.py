@@ -42,7 +42,7 @@ PARALLEL_SCRIPT = 'scripts/local/verify_parallel_sandbox.py'
 
 BROWSER_SCRIPTS = ('scripts/local/verify_browser_quality.py',
                    'scripts/ci/browser_quality_fixtures.py',
-                   'scripts/local/verify_browser_lifecycle.py')
+                   'scripts/local/verify_browser_lifecycle.py', 'scripts/local/verify_package_lifecycle.py')
 
 
 class AdmissionError(ValueError):
@@ -79,7 +79,7 @@ def fingerprint(compiled, harbor_binary):
     suite_run._verify_sandbox_runtime(compiled, harbor, run_process=subprocess.run)
     image = json.loads(subprocess.check_output(['docker','image','inspect',compiled.suite.sandbox.runtime_image],text=True))[0]
     daemon = json.loads(subprocess.check_output(['docker','info','--format','{{json .}}'],text=True))
-    browser = any(item.get('repair_revision',{}).get('oracle')=='activity-explorer'
+    browser = any(item.get('repair_revision',{}).get('oracle') in ('activity-explorer','private-evaluation')
                   for item in compiled.manifest['task_sets'])
     return {'schema':1, 'implementation_scope':'execution-import-closure-v1', 'host':socket.gethostname(),
             **({'execution_profile':'browser-v1'} if browser else {}),
@@ -89,6 +89,7 @@ def fingerprint(compiled, harbor_binary):
             'implementation':implementation(),
             'models':sorted({(arm.arm.model,arm.agent.model_name,arm.agent.kwargs['reasoning_effort']) for arm in compiled.arms}),
             'concurrency':compiled.suite.run.concurrency,
+            **({'evaluation_package': compiled.manifest['sandbox']['evaluation_package']} if getattr(compiled.suite.sandbox, 'evaluation', None) else {}),
             **({'context_sha256':compiled.suite.sandbox.context_sha256}
                if compiled.suite.sandbox.context_archive else {})}
 
@@ -142,6 +143,9 @@ def validate_model_controls(directory, expected, records, evidence=None):
         exact['developer_workflows_passed'] = True
         if expected.get('execution_profile') == 'browser-v1':
             exact['browser_image_received'] = True
+        if expected.get('evaluation_package'):
+            exact.update(evaluation_package_sha256=expected['evaluation_package']['sha256'],
+                         private_asset_known_present=True, private_asset_probe='direct-symlink-subprocess-v1')
         if any(type(receipt.get(key)) is not type(value) or receipt.get(key) != value for key, value in exact.items()):
             raise AdmissionError('model control used another or incomplete execution treatment')
         context_sha = expected.get('context_sha256')
@@ -208,6 +212,14 @@ def validate_admission(path, expected):
         lifecycle=json.loads((path.parent/'browser-lifecycle/summary.json').read_text())
         if lifecycle.get('passed') is not True or lifecycle.get('runtime_image') != expected['image']['requested']:
             raise AdmissionError('browser lifecycle controls used another runtime or did not pass')
+    if expected.get('evaluation_package'):
+        name = 'package-lifecycle/summary.json'
+        if name not in evidence:
+            raise AdmissionError('missing private package lifecycle evidence')
+        private = json.loads((path.parent/name).read_text())
+        if (private.get('passed') is not True or private.get('package_sha256') != expected['evaluation_package']['sha256']
+                or private.get('runtime_image') != expected['image']['requested']):
+            raise AdmissionError('private lifecycle used another package or runtime')
     return value
 
 
@@ -233,7 +245,8 @@ def prepare_control(compiled, directory):
     init.init_scaffold(directory)
     tasks = directory/'.openbench/tasks'
     shutil.rmtree(tasks)
-    source = selected.task_set.path/selected.task_names[0]
+    source = (ROOT/'benchmarks/harbor/local/activity-explorer-c2-o2' if compiled.suite.sandbox.evaluation
+              else selected.task_set.path/selected.task_names[0])
     task = tasks/source.name
     shutil.copytree(source,task)
     target,marker=control_edit(task)
@@ -364,6 +377,17 @@ def qualify(compiled, directory, harbor_binary, auth_file):
         commands[0][commands[0].index('--task')+1]=str(browser_task)
         commands[1][commands[1].index('--task')+1]=str(browser_task)
         commands[1] += ['--project-check','pnpm build']
+    package_args = []
+    if compiled.suite.sandbox.evaluation:
+        authorization = compiled.suite.sandbox.evaluation
+        if len(compiled.task_sets) != 1:
+            raise AdmissionError('private qualification requires one pinned task set')
+        selected = compiled.task_sets[0]
+        browser_task = selected.task_set.path / selected.task_names[0]
+        package_args = ['--evaluation-archive', str(authorization.archive),
+                        '--evaluation-sha256', authorization.sha256, '--trust-evaluator']
+        commands[1][commands[1].index('--task')+1] = str(browser_task)
+        commands[1] += package_args
     if compiled.suite.sandbox.context_archive:
         context_args = ['--context-archive', str(compiled.suite.sandbox.context_archive),
                         '--context-sha256', compiled.suite.sandbox.context_sha256]
@@ -378,7 +402,7 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     for alias, record in list(model_records.items())[1:]:
         with (directory/record['log']).open('x') as log:
             subprocess.run([python,SCRIPTS[1],'--runtime-image',image,'--task',str(browser_task if browser else task),
-                            '--model',alias,'--output-dir',str((directory/record['receipt']).parent), *context_args,
+                            '--model',alias,'--output-dir',str((directory/record['receipt']).parent), *context_args, *package_args,
                             *(['--project-check','pnpm build'] if browser else [])],
                            cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
     if browser:
@@ -391,8 +415,15 @@ def qualify(compiled, directory, harbor_binary, auth_file):
     if before.get('concurrency') == 2:
         with (directory/'parallel.log').open('x') as log:
             subprocess.run([python,PARALLEL_SCRIPT,'--runtime-image',image,
-                            '--task',str(browser_task if browser else task),
+                            '--task',str(ROOT/'benchmarks/harbor/local/activity-explorer-c2-o2' if browser else task),
                             '--output',str(directory/'parallel')],cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
+    if compiled.suite.sandbox.evaluation:
+        with (directory/'package-lifecycle.log').open('x') as log:
+            subprocess.run([python,'scripts/local/verify_package_lifecycle.py', '--runtime-image',image,
+                            '--task',str(browser_task),'--archive',str(authorization.archive),
+                            '--sha256',authorization.sha256,'--trust-evaluator',
+                            '--output',str(directory/'package-lifecycle')],
+                           cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
     validate_model_controls(directory, before, model_records)
     if canonical(before) != canonical(fingerprint(compiled,harbor_binary)):
         raise AdmissionError('runtime changed during offline controls; authentication was not read')
