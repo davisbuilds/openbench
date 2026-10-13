@@ -44,7 +44,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     output = args.output.resolve()
-    if not output.is_relative_to(ROOT / 'results'):
+    if output.is_relative_to(ROOT.resolve()) and not output.is_relative_to((ROOT / 'results').resolve()):
         raise ValueError('replay evidence must stay under ignored results/')
     output.mkdir(parents=True, exist_ok=False)
     with tempfile.TemporaryDirectory() as directory:

@@ -100,8 +100,8 @@ finally:
 async def run(args):
     model, effort = REPAIR_MODEL_PAIRS[args.model]
     output = args.output_dir.resolve()
-    if not output.is_relative_to((REPO / "results").resolve()):
-        raise ValueError("--output-dir must be under the repository's ignored results directory")
+    if output.is_relative_to(REPO.resolve()) and not output.is_relative_to((REPO / 'results').resolve()):
+        raise ValueError("framework-local framework-local output must be under ignored results; external private roots are allowed")
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError("--output-dir must be empty to preserve previous evidence")
