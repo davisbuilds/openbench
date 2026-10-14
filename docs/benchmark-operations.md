@@ -37,6 +37,9 @@ omit the macOS-only `caffeinate` wrapper.
 set -u
 umask 077
 cd /absolute/path/to/pinned-checkout || exit 1
+# With a dedicated Colima profile, select it here: a running tmux server does
+# not take variables from the shell that opens the session.
+# export DOCKER_CONTEXT=colima-openbench
 run_dir=/absolute/path/to/new-run-directory
 mkdir -p "$run_dir" || exit 1
 # Exclusive creation refuses reuse of this launch receipt. Resume gets a new
