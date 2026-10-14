@@ -76,7 +76,7 @@ async def main():
     artifact = 'submission/review.json' if package.descriptor['backend'] == 'artifact-review-v1' else 'web/app.js'
     if package.descriptor['split'] != 'development':
         raise ValueError('lifecycle qualification requires a development package')
-    reference = output/'reference'
+    reference = output/'reference-source'
     write_files(reference, {n.removeprefix('controls/reference/'): b
                            for n,b in package.archive.files.items() if n.startswith('controls/reference/')})
     task=args.task.resolve()
