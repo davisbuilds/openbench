@@ -39,7 +39,7 @@ are rejected. Existing archives and exports are never overwritten.
 
 `cases.json` is a nonempty list of up to 128
 `{"id":"list","bucket":"content","request":{...}}` records. IDs are unique.
-Requests use the selected public worker's protocol. The first supported backend
+Requests use the selected public worker's protocol. The browser backend
 is `activity-explorer-v2`: its isolated-world browser observer remains public;
 case inputs and acceptance rules may be private. Ordinary project tests and
 configuration belong in the solver checkout when needed for realistic work.
@@ -60,6 +60,50 @@ Optional `viewport` requires integer width/height from 1 through 4096; absent
 viewport uses the worker default. Unknown request keys are rejected. Invalid
 requests fail freeze/load and replay before candidate execution, never as a
 candidate miss. These protocol checks do not replace task-quality controls.
+
+### Review artifacts
+
+`artifact-review-v1` observes a review report as data; it never executes submitted
+source or starts a browser. Every case request is exactly `{"mode":"review"}`.
+Cases and acceptance rules remain evaluator-owned, with at most 64 cases.
+The solver workspace must contain `submission/review.json`. Seed it with `{}`
+for a completion control: an empty, valid clean review is `{"findings":[]}`.
+
+The complete report has exactly this shape:
+
+```json
+{"findings":[{"title":"[P1] Handle absent input","body":"Explain the triggering condition and its consequence.","file":"src/example.py","line_start":2,"line_end":2,"priority":1}]}
+```
+
+All six finding fields are required. File paths are relative without traversal;
+line ranges are positive and ordered; priority is an integer 0 through 3.
+There are at most 64 findings, titles at most 512 characters, bodies at most
+16,000 characters and paths at most 512 characters. The entire UTF-8 artifact
+is bounded to 64 KiB. Duplicate keys, nonfinite numbers and unknown fields fail.
+Schema validation does not establish that findings are correct or well located.
+
+The fixed observer returns `{"ok":true,"value":{"findings":[...],"scope_drift":[]}}`.
+It compares the complete submitted workspace to the approved initial file hashes,
+excluding `submission/` outputs and generated `.git/` state. The runtime's `.git`
+file is exempt only for the exact pointer `gitdir: /tmp/openbench-workspace.git`
+followed by a newline; altered pointers remain source drift. Added, removed and
+changed source bytes are recorded in `scope_drift`. Any scope drift forces all
+affected checks to fail even if the evaluator returns pass. File permissions
+are not part of this byte comparison. Run checks that create caches or scratch
+outside the source tree. Malformed or missing reports return `ok:false`; these
+are candidate misses, not infrastructure exclusions. Evaluators must handle
+failed observations and return their normal bounded verdicts.
+
+Reference controls live under `controls/reference/` and may overlay only the
+report onto the original reviewed source. Retain baseline, two byte-distinct
+valid outputs and targeted invalid reports for every scoring bucket. Two clean
+reports differing only in whitespace prove accepted encodings, not independent
+semantic implementations. Quality receipts validate the declared screening
+controls; neither lexical screening nor report validity alone establishes
+semantic review quality. Preserve independent semantic adjudication as separate
+evidence when making that claim.
+
+### Trusted evaluator
 
 The private `evaluator.py` defines:
 
@@ -111,7 +155,8 @@ explicit solver namespace before freezing: namespace separation cannot detect
 an author deliberately or accidentally placing an answer in solver-visible text.
 The package archive itself must never be mounted/copied into a solver container.
 
-Replay accepts a frozen root containing only `web/`. Its report and the adjacent
+Browser replay accepts a frozen root containing only `web/`; review replay takes
+the complete frozen workspace so source drift remains observable. Its report and the adjacent
 `.evidence` operation directory are private, newly created files. Reports bind
 package, source, public implementation and immutable runtime identity; include
 observations and failed checks; and explicitly set `campaign_eligible: false`.
@@ -192,8 +237,13 @@ model configuration using offline transport, including direct/symlink/subprocess
 reads of a known-present host archive. It also exercises the package's reference,
 malformed-source and forged-reward Harbor lifecycle, followed by the existing
 short authenticated public file-edit controls. These are runtime qualification,
-not benchmark model attempts. This first qualification route requires a
-**development** package with `controls/reference/web/`; use independently
+not benchmark model attempts. Qualification requires a
+**development** package with reference controls matching its backend. Browser
+packages require `controls/reference/web/`; review packages require
+`controls/reference/submission/review.json`. Review qualification uses the
+non-browser observer, report export, malformed-artifact and forged-reward
+controls, while retaining private archive denial and native tool-loop checks.
+Use independently
 reviewed held-out content only after its qualification policy is established.
 
 Then use ordinary `obench campaign launch --admission ... --quality ...`.

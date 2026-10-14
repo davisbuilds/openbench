@@ -26,7 +26,7 @@ class FixtureAgent(DojoFixture):
         with tempfile.NamedTemporaryFile(prefix='obench-oracle-host-canary-') as canary:
             canary.write(b'host-only');canary.flush()
             code=("from pathlib import Path; "
-                  "assert Path('/app/web/app.js').is_file(); "
+                  f"assert Path('/app/{self.artifact}').is_file(); "
                   f"assert not Path({canary.name!r}).exists(); "
                   "assert not Path('/opt/openbench/obench/repair_oracles').exists(); "
                   "assert not Path('/opt/openbench/obench/repair_grading.py').exists()")
@@ -35,19 +35,28 @@ class FixtureAgent(DojoFixture):
 
     async def run(self,instruction,environment,context):
         if self.mode=='reference':
-            for source in sorted((self.reference/'web').iterdir()):
+            for source in sorted(self.reference.rglob('*')):
+                if not source.is_file(): continue
+                relative = source.relative_to(self.reference).as_posix()
                 destination='/tmp/fixture-'+source.name
                 await environment.upload_file(source,destination)
-                result=await environment.exec('cp '+shlex.quote(destination)+' '+shlex.quote('/app/web/'+source.name))
+                result=await environment.exec('mkdir -p '+shlex.quote(str(Path('/app')/Path(relative).parent))+' && cp '+shlex.quote(destination)+' '+shlex.quote('/app/'+relative))
                 if result.return_code: raise RuntimeError('reference overlay failed')
         if self.mode=='malformed':
-            result=await environment.exec('rm /app/web/app.js && ln -s /etc/passwd /app/web/app.js')
+            target = shlex.quote('/app/' + self.artifact)
+            result=await environment.exec('rm '+target+' && ln -s /etc/passwd '+target)
             if result.return_code: raise RuntimeError('malformed source control failed')
         if self.mode=='forged-reward':
             result=await environment.exec("printf '1.0\\n' > /logs/verifier/reward.txt")
             if result.return_code: raise RuntimeError('candidate reward write control did not activate')
         context.metadata={'offline_fixture':self.mode,'model_calls':0}
         context.n_input_tokens=context.n_output_tokens=0
+
+    def __init__(self, *args, artifact='web/app.js', **kwargs):
+        super().__init__(*args, **kwargs)
+        if artifact not in ('web/app.js', 'submission/review.json'):
+            raise ValueError('unsupported lifecycle artifact')
+        self.artifact = artifact
 
 
 async def main():
@@ -64,6 +73,7 @@ async def main():
     from obench.harbor_sandbox import write_files
     authorization = pin(args.archive, args.sha256, args.trust_evaluator)
     package = authorization.load()
+    artifact = 'submission/review.json' if package.descriptor['backend'] == 'artifact-review-v1' else 'web/app.js'
     if package.descriptor['split'] != 'development':
         raise ValueError('lifecycle qualification requires a development package')
     reference = output/'reference'
@@ -75,7 +85,7 @@ async def main():
         config=TrialConfig.model_validate({
             'task':{'path':str(task)},'trial_name':mode,'trials_dir':str(output),
             'agent':{'import_path':'verify_package_lifecycle:FixtureAgent',
-                     'kwargs':{'mode':mode,'reference':str(reference)}},
+                     'kwargs':{'mode':mode,'reference':str(reference),'artifact':artifact}},
             'environment':{'import_path':'obench.harbor_sandbox:RepairSandbox',
                            'kwargs':{'runtime_image':args.runtime_image, **authorization.kwargs()}},
             'verifier':{'import_path':'obench.package_campaign:PackageVerifier',

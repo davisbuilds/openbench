@@ -32,7 +32,9 @@ def strict_json(raw):
     return json.loads(raw, object_pairs_hook=pairs, parse_float=number, parse_constant=constant)
 
 
-def run_worker(image: str, archive: bytes, cases: list[dict], *, program: str, timeout=30, browser=False) -> tuple[list, dict]:
+def run_worker(image: str, archive: bytes, cases: list[dict], *, program: str, timeout=30, browser=False, output_limit=None) -> tuple[list, dict]:
+    if output_limit is not None and (type(output_limit) is not int or not 1 <= output_limit <= 8 * 1024 * 1024):
+        raise GradingError('invalid bounded worker output limit')
     requested_image = image
     if not re.fullmatch(r'(?:[A-Za-z0-9][A-Za-z0-9._:/-]*@)?sha256:[0-9a-f]{64}', image):
         raise GradingError('worker image must be pinned by digest or image ID')
@@ -71,7 +73,7 @@ def run_worker(image: str, archive: bytes, cases: list[dict], *, program: str, t
         try:
             raw = bounded_command(['docker','start','--attach','--interactive',name],
                                   input_bytes=json.dumps({'source':base64.b64encode(archive).decode(),'cases':cases}).encode(), timeout=timeout,
-                                  **({'limit':8*1024*1024} if browser else {}))
+                                  **({'limit':output_limit} if output_limit is not None else {'limit':8*1024*1024} if browser else {}))
         except _CommandFailure as exc:
             # A daemon/start failure is infrastructure. Only classify failures as
             # candidate-caused after Docker proves the worker actually started.

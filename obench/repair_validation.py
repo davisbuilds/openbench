@@ -57,12 +57,13 @@ def inspect_task(task, *, evaluation=None):
         from . import package_campaign
         manifest = package_campaign.validate_task_binding(task, metadata['openbench_task_content_digest'], evaluation)
         package = evaluation.load()
+        review = package.descriptor['backend'] == 'artifact-review-v1'
         checks = [{'id': c['id'], 'bucket': c['bucket']} for c in package.cases]
         return {'schema': 1, 'kind': 'repair-task-inspection', 'task': str(task),
                 'task_binding': metadata['openbench_task_content_digest'],
-                'revision': repair_identity.record(manifest), 'source_prefix': 'web',
+                'revision': repair_identity.record(manifest), 'source_prefix': '' if review else 'web',
                 'checks': checks, 'buckets': sorted({c['bucket'] for c in checks}),
-                'quality_eligible': True, 'browser': True,
+                'quality_eligible': True, 'browser': not review,
                 'evaluation_package': package_campaign.metadata(package),
                 'limitations': ['controls do not establish held-out difficulty'],
                 'next': 'obench repair validate with explicit evaluation pin and trust'}
@@ -99,7 +100,9 @@ def source_files(source, info):
     prefix = Path(info['source_prefix'])
     if source.is_symlink() or any((source / p).is_symlink() for p in (prefix, *prefix.parents)):
         raise ValueError('source tree contains a symlink ancestor')
-    files = {f'{prefix.as_posix()}/{name}': data for name, data in read_tree(source / prefix).items()}
+    files = {(name if prefix == Path('.') else f'{prefix.as_posix()}/{name}'): data
+             for name, data in read_tree(source / prefix).items()
+             if not (prefix == Path('.') and name.startswith('.git/'))}
     if info['revision']['oracle'] == 'dojo-evidence':
         expected = {p.relative_to(Path(info['task']) / 'environment/app').as_posix()
                     for p in (Path(info['task']) / 'environment/app' / prefix).glob('*.py')}

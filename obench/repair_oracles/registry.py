@@ -19,6 +19,8 @@ class Oracle:
 
 
 ORACLES = {
+    'artifact-review-v1': Oracle('artifact-review-v1',
+        'obench.repair_oracles.artifact_review_v1', '', 'artifact-observations-v1'),
     'activity-explorer-v2': Oracle('activity-explorer-v2',
         'obench.repair_oracles.activity_explorer_v2', 'web/', 'browser-observations-v1'),
     'activity-explorer-v1': Oracle('activity-explorer-v1',
@@ -36,6 +38,7 @@ MODULES = ('obench.sandbox_grading', 'obench.harbor_sandbox', 'obench.repair_wor
            'obench.repair_oracles.agentmonitor_v3', 'obench.browser_worker',
            'obench.browser_policy', 'obench.repair_oracles.activity_explorer',
            'obench.browser_worker_v2', 'obench.repair_oracles.activity_explorer_v2')
+MODULES = (*MODULES, 'obench.repair_oracles.artifact_review_v1')
 PACKAGE = Path(__file__).resolve().parents[1]
 
 
@@ -63,6 +66,8 @@ def select(metadata):
 
 
 def source_names(oracle, files):
+    if oracle.id == 'artifact-review-v1':
+        return {name for name in files if not name.startswith('.git/')}
     return {name for name in files if name.startswith(oracle.source_prefix)}
 
 

@@ -30,6 +30,7 @@ async def verify(archive, sha256, image, output, *, trust_evaluator=False):
     if not trust_evaluator:
         raise ValueError('explicit evaluator trust required')
     approved = package.load(archive, sha256)
+    review = approved.descriptor['backend'] == 'artifact-review-v1'
     if approved.descriptor['split'] != 'development':
         raise ValueError('qualification controls must be development material')
     reference = {n.removeprefix('controls/reference/'): b for n, b in approved.archive.files.items()
@@ -39,11 +40,21 @@ async def verify(archive, sha256, image, output, *, trust_evaluator=False):
             root = Path(temporary).resolve()
             package.export(approved, root / 'export')
             source = root / 'export/workspace'
-            sources = {p.relative_to(source).as_posix() for p in (source / 'web').rglob('*') if p.is_file()}
-            if not reference or set(reference) != sources:
+            sources = {p.relative_to(source).as_posix() for p in (source if review else source / 'web').rglob('*') if p.is_file()}
+            if review:
+                if 'submission/review.json' not in reference or not set(reference) <= sources:
+                    raise ValueError('review reference must include the report and only solver files')
+            elif not reference or set(reference) != sources:
                 raise ValueError('reference must mirror the solver web subtree for this control')
             environment = root / 'environment'
             shutil.copytree(source, environment / 'app')
+            extra = {'source_paths': sorted(sources)}
+            if review:
+                from obench.package_campaign import export_task, pin
+                task = root / 'task'
+                export_task(approved, task)
+                environment = task / 'environment'
+                extra = pin(archive, sha256, True).kwargs()
             # A positive host read of the exact forbidden target precedes denial.
             if hashlib.sha256(archive.read_bytes()).hexdigest() != sha256:
                 raise ValueError('host archive detector failed')
@@ -54,7 +65,7 @@ async def verify(archive, sha256, image, output, *, trust_evaluator=False):
                         session_id='package-' + uuid.uuid4().hex, trial_paths=TrialPaths(root / mode),
                         task_env_config=EnvironmentConfig(network_mode='no-network', cpus=1, memory_mb=512),
                         network_policy=NetworkPolicy(network_mode=NetworkMode.NO_NETWORK),
-                        runtime_image=image, source_paths=sorted(sources))
+                        runtime_image=image, **extra)
                     try:
                         await env.start()
                         probe = r'''

@@ -26,6 +26,21 @@ def fixture():
     }
 
 
+def artifact_fixture():
+    """Public synthetic review input; grading assertions stay outside the solver."""
+    files = fixture()
+    descriptor = json.loads(files['evaluation.json'])
+    descriptor['backend'] = 'artifact-review-v1'
+    files['evaluation.json'] = json.dumps(descriptor).encode()
+    files['cases.json'] = b'[{"id":"finding","bucket":"correctness","request":{"mode":"review"}}]'
+    files.pop('solver/workspace/web/index.html')
+    files.pop('controls/reference/web/index.html')
+    files['solver/workspace/src/example.py'] = b'def normalize(value):\n    return value.strip()\n'
+    files['solver/workspace/submission/review.json'] = b'{}'
+    files['controls/reference/submission/review.json'] = b'{"findings":[]}'
+    return files
+
+
 class PackageTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -37,6 +52,20 @@ class PackageTests(unittest.TestCase):
         path = self.root / 'package.tar'
         sha = _write(files, {n: 0o644 for n in files}, path, 'evaluation', {})
         return path, sha
+
+    def test_review_artifact_package_needs_no_browser_checkout(self):
+        path, sha = self.archive(artifact_fixture())
+        approved = package.load(path, sha)
+        self.assertEqual(approved.descriptor['backend'], 'artifact-review-v1')
+        self.assertEqual(approved.cases[0]['request'], {'mode': 'review'})
+
+    def test_review_request_rejects_paths_and_unknown_fields(self):
+        for request in ({}, {'mode': 'browser'}, {'mode': 'review', 'path': '/etc/passwd'}):
+            with self.subTest(request=request):
+                files = artifact_fixture()
+                files['cases.json'] = json.dumps([{'id': 'x', 'bucket': 'b', 'request': request}]).encode()
+                with self.assertRaisesRegex(ValueError, 'review request'):
+                    package._validate(files)
 
     def test_only_closed_backend_not_module_from_package(self):
         files = fixture()

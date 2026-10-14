@@ -112,6 +112,33 @@ class SandboxImportTests(unittest.TestCase):
         self.assertEqual(rows[0]['candidate_provenance']['sandbox_gateway_module_sha256'], '4' * 64)
         self.assertEqual(len((self.root / 'rows.jsonl').read_text().splitlines()), 1)
 
+    def test_private_review_receipt_keeps_worker_shutdown_and_artifact_binding(self):
+        import copy
+        from obench.harbor_results import _validate_sandbox_receipt
+        fixture, _ = self.fixture(cli_version='0.162.0', model='gpt-6.1-sol', effort='high')
+        trial = fixture.trial()
+        path = trial / 'verifier/sandbox-grading.json'
+        receipt = json.loads(path.read_text())
+        identity = {'sha256': '5' * 64, 'evaluation': {'schema': 1, 'id': 'synthetic-review',
+                    'case_revision': 1, 'oracle_revision': 1, 'split': 'development', 'backend': 'artifact-review-v1'}}
+        receipt['task_binding'].update(scheme=5, evaluation_package=identity)
+        receipt['grading'].update(evaluation_package=identity, oracle_id='private-evaluation', protocol='artifact-observations-v1')
+        digest = {'scheme': 5, 'sha256': hashlib.sha256(json.dumps(receipt['task_binding'],
+                  sort_keys=True, separators=(',', ':')).encode()).hexdigest()}
+        def validate(value):
+            _write_json(path, value)
+            return _validate_sandbox_receipt(trial, digest, 1, 'review', expected_image=IMAGE,
+                expected_model='gpt-6.1-sol', expected_effort='high', expected_package='5' * 64)
+        self.assertEqual(validate(receipt), path)
+        for mutate in (lambda r: r['grading'].update(protocol='browser-observations-v1'),
+                       lambda r: r['grading'].update(worker=None),
+                       lambda r: r['freeze'].update(solver_stopped=False),
+                       lambda r: r['grading'].update(source_sha256={'answer.txt': '0' * 64}),
+                       lambda r: r['grading']['worker'].update(host_mounts=True)):
+            value = copy.deepcopy(receipt); mutate(value)
+            with self.assertRaises(HarborResultsError):
+                validate(value)
+
     def test_new_cli_pin_imports_without_invalidating_historical_pin(self):
         fixture, plan = self.fixture(cli_version='0.157.0')
         rows = self.import_fixture(fixture, plan)

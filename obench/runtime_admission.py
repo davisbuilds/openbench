@@ -79,8 +79,10 @@ def fingerprint(compiled, harbor_binary):
     suite_run._verify_sandbox_runtime(compiled, harbor, run_process=subprocess.run)
     image = json.loads(subprocess.check_output(['docker','image','inspect',compiled.suite.sandbox.runtime_image],text=True))[0]
     daemon = json.loads(subprocess.check_output(['docker','info','--format','{{json .}}'],text=True))
-    browser = any(item.get('repair_revision',{}).get('oracle') in ('activity-explorer','private-evaluation')
+    browser = any(item.get('repair_revision',{}).get('oracle') == 'activity-explorer'
                   for item in compiled.manifest['task_sets'])
+    if compiled.suite.sandbox.evaluation:
+        browser = compiled.suite.sandbox.evaluation.load().descriptor['backend'] == 'activity-explorer-v2'
     return {'schema':1, 'implementation_scope':'execution-import-closure-v1', 'host':socket.gethostname(),
             **({'execution_profile':'browser-v1'} if browser else {}),
             'image':{'id':image['Id'],'requested':compiled.suite.sandbox.runtime_image,'os':image['Os'],'architecture':image['Architecture']},
@@ -245,7 +247,9 @@ def prepare_control(compiled, directory):
     init.init_scaffold(directory)
     tasks = directory/'.openbench/tasks'
     shutil.rmtree(tasks)
-    source = (ROOT/'benchmarks/harbor/local/activity-explorer-c2-o2' if compiled.suite.sandbox.evaluation
+    source = ((ROOT/'benchmarks/harbor/local/activity-explorer-c2-o2'
+               if compiled.suite.sandbox.evaluation.load().descriptor['backend'] == 'activity-explorer-v2'
+               else ROOT/'benchmarks/harbor/local/dojo-evidence-pr60-v5') if compiled.suite.sandbox.evaluation
               else selected.task_set.path/selected.task_names[0])
     task = tasks/source.name
     shutil.copytree(source,task)
@@ -401,7 +405,8 @@ def qualify(compiled, directory, harbor_binary, auth_file):
                 subprocess.run(command,cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)
     for alias, record in list(model_records.items())[1:]:
         with (directory/record['log']).open('x') as log:
-            subprocess.run([python,SCRIPTS[1],'--runtime-image',image,'--task',str(browser_task if browser else task),
+            probe_task = browser_task if browser or compiled.suite.sandbox.evaluation else task
+            subprocess.run([python,SCRIPTS[1],'--runtime-image',image,'--task',str(probe_task),
                             '--model',alias,'--output-dir',str((directory/record['receipt']).parent), *context_args, *package_args,
                             *(['--project-check','pnpm build'] if browser else [])],
                            cwd=ROOT,check=True,stdout=log,stderr=subprocess.STDOUT)

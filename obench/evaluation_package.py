@@ -16,11 +16,11 @@ import tempfile
 from . import frozen_context, repair_worker
 from .harbor_sandbox import pack_files, read_tree, validate_image
 from .repair_evidence import Operation, write_json
-from .repair_oracles import activity_explorer_v2
+from .repair_oracles import activity_explorer_v2, artifact_review_v1
 from .sandbox_grading import CandidateFailure
 
 # Code paths are owned by OpenBench, never by the package descriptor.
-BACKENDS = {'activity-explorer-v2': activity_explorer_v2}
+BACKENDS = {'activity-explorer-v2': activity_explorer_v2, 'artifact-review-v1': artifact_review_v1}
 REQUIRED = {'evaluation.json', 'cases.json', 'evaluator.py', 'solver/instruction.md'}
 SCOPE = 'diagnostic private-package replay; not campaign admission or a benchmark result'
 
@@ -80,8 +80,6 @@ def _validate(files):
         frozen_context._name(name)
         if name not in REQUIRED and not name.startswith(('solver/workspace/', 'fixtures/', 'controls/')):
             raise ValueError('undeclared package path')
-    if not any(n.startswith('solver/workspace/web/') for n in files):
-        raise ValueError('browser package requires a solver web checkout')
     descriptor = _json(files['evaluation.json'])
     if (not isinstance(descriptor, dict) or set(descriptor) !=
             {'schema', 'id', 'case_revision', 'oracle_revision', 'split', 'backend'}
@@ -95,9 +93,17 @@ def _validate(files):
         raise ValueError('split must be development or holdout')
     if not isinstance(descriptor['backend'], str) or descriptor['backend'] not in BACKENDS:
         raise ValueError('unknown public worker backend')
+    review = descriptor['backend'] == 'artifact-review-v1'
+    if review:
+        if 'solver/workspace/submission/review.json' not in files:
+            raise ValueError('review package requires seeded submission/review.json')
+    elif not any(n.startswith('solver/workspace/web/') for n in files):
+        raise ValueError('browser package requires a solver web checkout')
     cases = _json(files['cases.json'])
     if not isinstance(cases, list) or not 1 <= len(cases) <= 128:
         raise ValueError('package requires 1 through 128 cases')
+    if review and len(cases) > 64:
+        raise ValueError('review package permits at most 64 artifact checks')
     ids = set()
     for case in cases:
         if (not isinstance(case, dict) or set(case) != {'id', 'bucket', 'request'}
@@ -106,7 +112,7 @@ def _validate(files):
                        for k in ('id', 'bucket')) or case['id'] in ids):
             raise ValueError('invalid or duplicate evaluation case')
         ids.add(case['id'])
-        _browser_request(case['request'])
+        (artifact_review_v1.validate_request if review else _browser_request)(case['request'])
     # Validate syntax without executing imports or top-level code.
     compile(files['evaluator.py'], '<approved-evaluator>', 'exec')
     files['solver/instruction.md'].decode('utf-8')
@@ -194,6 +200,9 @@ def _checks(package, observations, *, trust_evaluator):
             raise ValueError('invalid evaluator verdict: require boolean pass and bounded failure reasons')
         # An evaluator cannot turn worker failure into successful candidate behavior.
         failed = verdict['reasons'] if observation.get('ok') is True else ['worker-operation-failed']
+        if (package.descriptor['backend'] == 'artifact-review-v1' and observation.get('ok') is True
+                and observation.get('value', {}).get('scope_drift')):
+            failed = ['review-scope-drift']
         checks.append({'id': case['id'], 'bucket': case['bucket'], 'pass': not failed,
                        'failure_reasons': failed})
     return checks
@@ -218,15 +227,24 @@ def replay(path, sha256, source, image, *, trust_evaluator=False, timeout=90):
     backend = BACKENDS[package.descriptor['backend']]
     runtime = backend.validate_runtime(image)
     files = read_tree(Path(source))
-    if any(not n.startswith('web/') for n in files):
+    review = package.descriptor['backend'] == 'artifact-review-v1'
+    if not review and any(not n.startswith('web/') for n in files):
         raise ValueError('browser replay source must contain only the web subtree')
+    requests = [c['request'] for c in package.cases]
+    if review:
+        protected = {n.removeprefix('solver/workspace/'): hashlib.sha256(b).hexdigest()
+                     for n, b in package.archive.files.items() if n.startswith('solver/workspace/')
+                     and not n.startswith(('solver/workspace/submission/', 'solver/workspace/.git/'))}
+        requests = [{**r, **({'protected_sha256': protected} if i == 0 else {})}
+                    for i, r in enumerate(requests)]
     # Capture once. Hash exactly the bytes sent to the confined worker.
     source_hashes = {n: hashlib.sha256(b).hexdigest() for n, b in sorted(files.items())}
     candidate_failure = None
     worker = None
     try:
         observations, worker = repair_worker.run_worker(image, pack_files(files),
-            [c['request'] for c in package.cases], program=backend.worker_program(), timeout=timeout, browser=True)
+            requests, program=backend.worker_program(), timeout=timeout, browser=not review,
+            **({'output_limit': 8 * 1024 * 1024} if review else {}))
     except CandidateFailure as exc:
         candidate_failure = exc.reason
         observations = [{'ok': False} for _ in package.cases]
