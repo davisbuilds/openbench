@@ -76,9 +76,9 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def running(self, profile, cpus, memory_gib):
+    def running(self, profile, cpus, memory_gib, disk_gib=100):
         record = {"name": profile, "status": "Running", "arch": "aarch64", "cpus": cpus,
-                  "memory": memory_gib * GIB, "disk": 100 * GIB, "runtime": "docker"}
+                  "memory": memory_gib * GIB, "disk": disk_gib * GIB, "runtime": "docker"}
         (self.dir / "list.json").write_text(json.dumps(record) + "\n")
 
     def stopped(self):
@@ -102,6 +102,14 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
         self.assertEqual(self.colima_calls(calls, "stop"), [])
         self.assertEqual(self.colima_calls(calls, "start"), [])
 
+    def test_default_profile_runs_are_told_to_select_its_context(self):
+        # The checks above pin the colima context; a run that inherits another
+        # active context would use a daemon those checks never saw.
+        self.running("default", 4, 12)
+        result, _ = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("export DOCKER_CONTEXT=colima\n", result.stdout)
+
     def test_undersized_vm_is_restarted_with_the_pinned_floor(self):
         self.running("default", 4, 6)
         result, calls = self.run_script()
@@ -110,6 +118,27 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
         (start,) = self.colima_calls(calls, "start")
         self.assertIn("--cpu 4", start)
         self.assertIn("--memory 12", start)
+
+    def test_undersized_disk_is_restarted_with_the_pinned_floor(self):
+        self.running("default", 4, 12, disk_gib=60)
+        result, calls = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.colima_calls(calls, "stop")), 1)
+        (start,) = self.colima_calls(calls, "start")
+        self.assertIn("--disk 100", start)
+
+    def test_profile_aliases_resolve_as_colima_does(self):
+        # colima treats "colima" as the default profile and strips "colima-".
+        self.running("openbench", 4, 12)
+        result, calls = self.run_script("--profile", "colima-openbench")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.colima_calls(calls, "start"), [])
+        self.assertIn("export DOCKER_CONTEXT=colima-openbench", result.stdout)
+        self.running("default", 4, 12)
+        result, calls = self.run_script("--profile", "colima")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.colima_calls(calls, "start"), [])
+        self.assertIn("export DOCKER_CONTEXT=colima\n", result.stdout)
 
     def test_named_profile_targets_only_its_own_vm_and_context(self):
         self.stopped()

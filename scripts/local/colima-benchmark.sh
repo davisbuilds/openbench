@@ -22,8 +22,8 @@
 #
 # Profiles: --profile NAME (or OBENCH_COLIMA_PROFILE) runs benchmarks in their
 # own VM, leaving the default VM, its size and the current Docker context to
-# other workloads on the host. Runs then select the VM with
-# DOCKER_CONTEXT=colima-NAME, which the script prints at the end.
+# other workloads on the host. Either way, runs select the checked VM with
+# DOCKER_CONTEXT (colima, or colima-NAME), which the script prints at the end.
 #
 # Requirements: colima, docker CLI, python3; brew for buildx and autostart
 # ============================================================================
@@ -56,7 +56,8 @@ docker_context() {
 dk() { DOCKER_CONTEXT="$(docker_context)" docker "$@"; }
 colima_p() { local verb="$1"; shift; colima "$verb" --profile "$PROFILE" "$@"; }
 
-# Prints "<cpus> <memory GiB>" when the profile's VM is running, else nothing.
+# Prints "<cpus> <memory GiB> <disk GiB>" when the profile's VM is running,
+# else nothing.
 # `colima status` reports neither figure, so read `colima list --json`. List
 # every profile and filter here: `colima list --profile X` fails until X exists.
 running_resources() {
@@ -68,7 +69,8 @@ for line in sys.stdin:
         continue
     vm = json.loads(line)
     if vm.get("name") == sys.argv[1] and vm.get("status") == "Running":
-        print(int(vm.get("cpus", 0)), int(vm.get("memory", 0)) // 2**30)
+        print(int(vm.get("cpus", 0)), int(vm.get("memory", 0)) // 2**30,
+              int(vm.get("disk", 0)) // 2**30)
 ' "$PROFILE"
 }
 
@@ -83,7 +85,9 @@ show_status() {
     info "colima profile '$PROFILE' is NOT running"
     return
   fi
-  info "colima profile '$PROFILE' is running: CPUs/GiB ${resources}"
+  local cpus memory disk
+  read -r cpus memory disk <<<"$resources"
+  info "colima profile '$PROFILE' is running: CPUs=${cpus} Memory=${memory}GiB Disk=${disk}GiB"
   echo ""
   info "docker info resource summary (context $(docker_context)):"
   dk info --format '{{.ServerVersion}}' 2>/dev/null && \
@@ -134,16 +138,17 @@ install_buildx() {
 # ---- start / restart colima --------------------------------------------------
 start_colima() {
   local action="$1"  # "start" or "restart"
-  local resources cpus memory
+  local resources cpus memory disk
 
   resources="$(running_resources)"
   if [ "$action" = "start" ] && [ -n "$resources" ]; then
-    read -r cpus memory <<<"$resources"
-    if [ "$cpus" -ge "$COLIMA_CPUS" ] && [ "$memory" -ge "$COLIMA_MEMORY" ]; then
-      ok "colima profile '$PROFILE' already meets CPU=${cpus} Memory=${memory}GiB (req: ${COLIMA_CPUS} CPUs, ${COLIMA_MEMORY} GiB)"
+    read -r cpus memory disk <<<"$resources"
+    if [ "$cpus" -ge "$COLIMA_CPUS" ] && [ "$memory" -ge "$COLIMA_MEMORY" ] &&
+       [ "$disk" -ge "$COLIMA_DISK" ]; then
+      ok "colima profile '$PROFILE' already meets CPU=${cpus} Memory=${memory}GiB Disk=${disk}GiB (req: ${COLIMA_CPUS} CPUs, ${COLIMA_MEMORY} GiB, ${COLIMA_DISK} GiB)"
       return 0
     fi
-    warn "colima profile '$PROFILE' running with CPU=${cpus} Memory=${memory}GiB — restarting with the pinned config..."
+    warn "colima profile '$PROFILE' running with CPU=${cpus} Memory=${memory}GiB Disk=${disk}GiB — restarting with the pinned config..."
     action="restart"
   fi
 
@@ -228,6 +233,12 @@ main() {
     esac
     shift
   done
+  # Resolve aliases as colima does: "colima" names the default profile, and a
+  # leading "colima-" is dropped.
+  case "$PROFILE" in
+    colima) PROFILE=default ;;
+    colima-*) PROFILE="${PROFILE#colima-}" ;;
+  esac
   [[ "$PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "invalid profile name: $PROFILE"
   if [ "$AUTOSTART" = 1 ] && [ "$PROFILE" != default ]; then
     fail "--autostart covers only the default profile; brew's colima service starts no other"
@@ -264,13 +275,12 @@ main() {
 
   echo ""
   ok "colima benchmark environment ready"
-  if [ "$PROFILE" = default ]; then
-    info "Next: obench run --task ... --harness ... --model ..."
-  else
-    info "Runs must target this VM. Set this where the run starts (in a tmux launch"
-    info "script, not only in the shell that opens tmux):"
-    echo "  export DOCKER_CONTEXT=$(docker_context)"
-  fi
+  # The checks above pinned this VM's context; a run that inherits another
+  # active context would use a daemon they never saw.
+  info "Runs must target this VM. Set this where the run starts (in a tmux launch"
+  info "script, not only in the shell that opens tmux):"
+  echo "  export DOCKER_CONTEXT=$(docker_context)"
+  info "Next: obench run --task ... --harness ... --model ..."
 }
 
 main "$@"
