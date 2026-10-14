@@ -47,34 +47,61 @@ memory_gib = 12
 Use `scripts/local/colima-benchmark.sh` for a one-command setup:
 
 ```bash
-bash scripts/local/colima-benchmark.sh          # full setup (idempotent)
-bash scripts/local/colima-benchmark.sh --restart # full stop + recreate
-bash scripts/local/colima-benchmark.sh --status  # check current VM resources
+bash scripts/local/colima-benchmark.sh                     # setup (idempotent)
+bash scripts/local/colima-benchmark.sh --restart           # stop + start + setup
+bash scripts/local/colima-benchmark.sh --status            # check VM resources
+bash scripts/local/colima-benchmark.sh --profile openbench # dedicated VM (below)
+bash scripts/local/colima-benchmark.sh --autostart         # + brew autostart
 ```
 
 This script:
-- Stops any running Colima
-- Starts with pinned `--cpu 4 --memory 12 --disk 100`
-- Enables `brew services` autostart so the VM survives reboot
-- Installs the Docker Buildx plugin
+- Leaves a running VM alone when it already meets the pinned floor, and
+  otherwise stops it and starts it with pinned `--cpu 4 --memory 12 --disk 100`
+- With `--autostart`, enables the `brew services` colima service so the VM
+  survives reboot (default profile only). It is opt-in because the VM then
+  reserves its memory from every login.
+- Installs the Docker Buildx plugin through Homebrew if it is missing
 - Runs a smoke test (hello-world container)
-- Invokes `obench doctor --docker-env` as a final gate
+- Invokes `obench doctor --docker-env` against the same VM as a final gate
+
+### Shared Hosts: a Dedicated Profile
+
+On a host whose default Colima VM serves other workloads, give benchmarks
+their own VM so the pinned floor and restarts never touch those workloads:
+
+```bash
+bash scripts/local/colima-benchmark.sh --profile openbench
+```
+
+The script then starts and checks only that profile, and leaves the current
+Docker context unchanged (`--activate=false`). Runs select the VM through its
+Docker context, `colima-openbench`. OpenBench and Harbor both call the `docker`
+CLI, so the variable reaches every container they start:
+
+```bash
+export DOCKER_CONTEXT=colima-openbench
+obench doctor --docker-env
+```
+
+`obench campaign qualify` and `obench campaign launch` pass `DOCKER_CONTEXT`
+from the launching shell into the campaign's tmux session. A hand-written
+tmux launch script must export it itself (see
+[benchmark operations](benchmark-operations.md)). The same profile can also
+come from `OBENCH_COLIMA_PROFILE`. Stop the VM after a campaign to return its
+memory: `colima stop --profile openbench`.
 
 ### Restart Procedure
 
 If the benchmark environment behaves unexpectedly:
 
 ```bash
-# 1. Stop Colima
+# Restart with the pinned config (add --profile NAME for a dedicated VM)
+bash scripts/local/colima-benchmark.sh --restart
+
+# Or by hand, for the default profile:
 colima stop
-
-# 2. Verify it's fully down
-colima status
-
-# 3. Restart with pinned config
+colima status   # exits non-zero once the VM is down
 colima start --cpu 4 --memory 12 --disk 100
-
-# 4. Verify the doctor gate passes
 obench doctor --docker-env
 ```
 
@@ -177,7 +204,7 @@ The version file is checked in at each task's
 
 ## Pre-Benchmark Checklist
 
-1. ✅ **Colima running** with pinned config (`colima start --cpu 4 --memory 12 --disk 100`)
+1. ✅ **Colima running** with pinned config (`bash scripts/local/colima-benchmark.sh`, plus `--profile NAME` and `DOCKER_CONTEXT=colima-NAME` on a shared host)
 2. ✅ **`obench doctor --docker-env`** passes (BUILDX, CPUS, MEMORY, IMAGES, AUTH)
 3. ✅ **Auth** configured per machine (never shared `auth.json`)
 4. ✅ **Per-task images** pulled and functional (`docker run --rm <image> python3 -c "print('ok')"`)
