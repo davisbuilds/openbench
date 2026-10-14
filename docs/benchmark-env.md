@@ -63,6 +63,9 @@ This script:
 - Installs the Docker Buildx plugin through Homebrew if it is missing
 - Runs a smoke test (hello-world container)
 - Invokes `obench doctor --docker-env` against the same VM as a final gate
+- Prints the `DOCKER_CONTEXT` that runs must export to use the checked VM
+  (`colima` for the default profile), since the active context may point at
+  another daemon
 
 ### Shared Hosts: a Dedicated Profile
 

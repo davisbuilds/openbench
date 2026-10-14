@@ -102,6 +102,14 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
         self.assertEqual(self.colima_calls(calls, "stop"), [])
         self.assertEqual(self.colima_calls(calls, "start"), [])
 
+    def test_default_profile_runs_are_told_to_select_its_context(self):
+        # The checks above pin the colima context; a run that inherits another
+        # active context would use a daemon those checks never saw.
+        self.running("default", 4, 12)
+        result, _ = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("export DOCKER_CONTEXT=colima\n", result.stdout)
+
     def test_undersized_vm_is_restarted_with_the_pinned_floor(self):
         self.running("default", 4, 6)
         result, calls = self.run_script()
@@ -130,7 +138,7 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
         result, calls = self.run_script("--profile", "colima")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.colima_calls(calls, "start"), [])
-        self.assertNotIn("export DOCKER_CONTEXT", result.stdout)
+        self.assertIn("export DOCKER_CONTEXT=colima\n", result.stdout)
 
     def test_named_profile_targets_only_its_own_vm_and_context(self):
         self.stopped()

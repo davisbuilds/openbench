@@ -22,8 +22,8 @@
 #
 # Profiles: --profile NAME (or OBENCH_COLIMA_PROFILE) runs benchmarks in their
 # own VM, leaving the default VM, its size and the current Docker context to
-# other workloads on the host. Runs then select the VM with
-# DOCKER_CONTEXT=colima-NAME, which the script prints at the end.
+# other workloads on the host. Either way, runs select the checked VM with
+# DOCKER_CONTEXT (colima, or colima-NAME), which the script prints at the end.
 #
 # Requirements: colima, docker CLI, python3; brew for buildx and autostart
 # ============================================================================
@@ -275,13 +275,12 @@ main() {
 
   echo ""
   ok "colima benchmark environment ready"
-  if [ "$PROFILE" = default ]; then
-    info "Next: obench run --task ... --harness ... --model ..."
-  else
-    info "Runs must target this VM. Set this where the run starts (in a tmux launch"
-    info "script, not only in the shell that opens tmux):"
-    echo "  export DOCKER_CONTEXT=$(docker_context)"
-  fi
+  # The checks above pinned this VM's context; a run that inherits another
+  # active context would use a daemon they never saw.
+  info "Runs must target this VM. Set this where the run starts (in a tmux launch"
+  info "script, not only in the shell that opens tmux):"
+  echo "  export DOCKER_CONTEXT=$(docker_context)"
+  info "Next: obench run --task ... --harness ... --model ..."
 }
 
 main "$@"
