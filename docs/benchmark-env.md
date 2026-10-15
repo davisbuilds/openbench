@@ -211,4 +211,4 @@ The version file is checked in at each task's
 2. ✅ **`obench doctor --docker-env`** passes (BUILDX, CPUS, MEMORY, IMAGES, AUTH)
 3. ✅ **Auth** configured per machine (never shared `auth.json`)
 4. ✅ **Per-task images** pulled and functional (`docker run --rm <image> python3 -c "print('ok')"`)
-5. ✅ **No benchmark running on the mini** (`ssh 100.66.10.106` — leave it alone)
+5. ✅ **No other campaign running on the benchmark host** (check before starting; leave an active one alone)
