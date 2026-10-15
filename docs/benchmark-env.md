@@ -51,6 +51,7 @@ bash scripts/local/colima-benchmark.sh                     # setup (idempotent)
 bash scripts/local/colima-benchmark.sh --restart           # stop + start + setup
 bash scripts/local/colima-benchmark.sh --status            # check VM resources
 bash scripts/local/colima-benchmark.sh --profile openbench # dedicated VM (below)
+bash scripts/local/colima-benchmark.sh --profile openbench --provision-only # qualify separately
 bash scripts/local/colima-benchmark.sh --autostart         # + brew autostart
 ```
 
@@ -66,6 +67,15 @@ This script:
 - Prints the `DOCKER_CONTEXT` that runs must export to use the checked VM
   (`colima` for the default profile), since the active context may point at
   another daemon
+
+Failed buildx, container smoke, or doctor checks exit nonzero. The doctor runs
+through `python3 -m obench.doctor` from this checkout; a missing standalone
+`obench` executable cannot silently skip it. Its environment diagnostic checks
+all supported authentication lanes, so it may report unrelated missing accounts.
+For VM provisioning before a selected campaign's image/auth setup, explicitly use
+`--provision-only`. That mode still requires buildx and a working container, skips
+the broad doctor diagnostic, and reports that campaign readiness is unchecked.
+It does not replace pinned-image verification or `obench campaign qualify`.
 
 ### Shared Hosts: a Dedicated Profile
 
