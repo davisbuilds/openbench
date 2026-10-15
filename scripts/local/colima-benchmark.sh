@@ -56,7 +56,10 @@ docker_context() {
   if [ "$PROFILE" = default ]; then echo colima; else echo "colima-$PROFILE"; fi
 }
 dk() { DOCKER_CONTEXT="$(docker_context)" docker "$@"; }
-colima_p() { local verb="$1"; shift; colima "$verb" --profile "$PROFILE" "$@"; }
+# Colima removes its Docker context when stopping. Docker's context rm treats
+# DOCKER_CONTEXT as the active selection and can reset an unrelated stored
+# context. Lifecycle operations must see the stored selection, not the run's.
+colima_p() { local verb="$1"; shift; env -u DOCKER_CONTEXT -u DOCKER_HOST colima "$verb" --profile "$PROFILE" "$@"; }
 
 # Prints "<cpus> <memory GiB> <disk GiB>" when the profile's VM is running,
 # else nothing.

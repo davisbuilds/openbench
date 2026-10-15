@@ -101,7 +101,17 @@ from the launching shell into the campaign's tmux session. A hand-written
 tmux launch script must export it itself (see
 [benchmark operations](benchmark-operations.md)). The same profile can also
 come from `OBENCH_COLIMA_PROFILE`. Stop the VM after a campaign to return its
-memory: `colima stop --profile openbench`.
+memory without inheriting the campaign's Docker selection:
+
+```bash
+env -u DOCKER_CONTEXT -u DOCKER_HOST colima stop --profile openbench
+```
+
+Colima removes the stopped profile's Docker context. If it inherits
+`DOCKER_CONTEXT=colima-openbench`, Docker can reset the stored global context to
+`default`, even when that stored context points elsewhere. The helper also
+clears these two variables for its own Colima lifecycle calls; Docker build/run
+commands still explicitly target the selected profile.
 
 ### Restart Procedure
 

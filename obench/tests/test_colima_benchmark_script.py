@@ -21,6 +21,7 @@ GIB = 1024 ** 3
 
 COLIMA_STUB = r"""#!/bin/sh
 echo "colima $*" >> "$STUB_LOG"
+printf "%s context=%s host=%s\n" "$1" "${DOCKER_CONTEXT:-}" "${DOCKER_HOST:-}" >> "$STUB_DIR/colima-env.log"
 case "$1" in
   list)
     # Like colima 0.10: listing a profile that does not exist yet fails.
@@ -107,6 +108,16 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
 
     def colima_calls(self, calls, verb):
         return [c for c in calls if c.startswith(f"colima {verb}")]
+
+    def test_profile_lifecycle_does_not_inherit_docker_selection(self):
+        self.running("openbench", 4, 6)
+        result, calls = self.run_script("--profile", "openbench", "--provision-only",
+            env={"DOCKER_CONTEXT": "colima-openbench", "DOCKER_HOST": "unix:///tmp/other.sock"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lifecycle = [line for line in (self.dir / "colima-env.log").read_text().splitlines()
+                     if line.startswith(("start ", "stop "))]
+        self.assertEqual(lifecycle, ["stop context= host=", "start context= host="])
+        self.assertTrue(any(c.startswith("docker DOCKER_CONTEXT=colima-openbench ") for c in calls))
 
     def test_failed_doctor_is_not_ready(self):
         self.running("openbench", 4, 12)
