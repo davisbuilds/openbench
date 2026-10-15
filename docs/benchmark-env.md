@@ -51,6 +51,7 @@ bash scripts/local/colima-benchmark.sh                     # setup (idempotent)
 bash scripts/local/colima-benchmark.sh --restart           # stop + start + setup
 bash scripts/local/colima-benchmark.sh --status            # check VM resources
 bash scripts/local/colima-benchmark.sh --profile openbench # dedicated VM (below)
+bash scripts/local/colima-benchmark.sh --profile openbench --provision-only # qualify separately
 bash scripts/local/colima-benchmark.sh --autostart         # + brew autostart
 ```
 
@@ -66,6 +67,15 @@ This script:
 - Prints the `DOCKER_CONTEXT` that runs must export to use the checked VM
   (`colima` for the default profile), since the active context may point at
   another daemon
+
+Failed buildx, container smoke, or doctor checks exit nonzero. The doctor runs
+through `python3 -m obench.doctor` from this checkout; a missing standalone
+`obench` executable cannot silently skip it. Its environment diagnostic checks
+all supported authentication lanes, so it may report unrelated missing accounts.
+For VM provisioning before a selected campaign's image/auth setup, explicitly use
+`--provision-only`. That mode still requires buildx and a working container, skips
+the broad doctor diagnostic, and reports that campaign readiness is unchecked.
+It does not replace pinned-image verification or `obench campaign qualify`.
 
 ### Shared Hosts: a Dedicated Profile
 
@@ -91,7 +101,17 @@ from the launching shell into the campaign's tmux session. A hand-written
 tmux launch script must export it itself (see
 [benchmark operations](benchmark-operations.md)). The same profile can also
 come from `OBENCH_COLIMA_PROFILE`. Stop the VM after a campaign to return its
-memory: `colima stop --profile openbench`.
+memory without inheriting the campaign's Docker selection:
+
+```bash
+env -u DOCKER_CONTEXT -u DOCKER_HOST colima stop --profile openbench
+```
+
+Colima removes the stopped profile's Docker context. If it inherits
+`DOCKER_CONTEXT=colima-openbench`, Docker can reset the stored global context to
+`default`, even when that stored context points elsewhere. The helper also
+clears these two variables for its own Colima lifecycle calls; Docker build/run
+commands still explicitly target the selected profile.
 
 ### Restart Procedure
 

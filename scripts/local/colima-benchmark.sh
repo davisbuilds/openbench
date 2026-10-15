@@ -8,6 +8,7 @@
 #   bash scripts/local/colima-benchmark.sh --restart           # stop + start + setup
 #   bash scripts/local/colima-benchmark.sh --status            # print VM resources
 #   bash scripts/local/colima-benchmark.sh --profile openbench # dedicated VM
+#   bash scripts/local/colima-benchmark.sh --provision-only  # VM checks; qualify later
 #   bash scripts/local/colima-benchmark.sh --autostart         # + brew autostart
 #
 # What this does (idempotently):
@@ -39,6 +40,7 @@ COLIMA_DISK=100    # GiB
 
 PROFILE="${OBENCH_COLIMA_PROFILE:-default}"
 AUTOSTART=0
+PROVISION_ONLY=0
 
 # ---- helpers ---------------------------------------------------------------
 info()  { printf "\033[36m[colima-benchmark]\033[0m %s\n" "$*"; }
@@ -54,7 +56,10 @@ docker_context() {
   if [ "$PROFILE" = default ]; then echo colima; else echo "colima-$PROFILE"; fi
 }
 dk() { DOCKER_CONTEXT="$(docker_context)" docker "$@"; }
-colima_p() { local verb="$1"; shift; colima "$verb" --profile "$PROFILE" "$@"; }
+# Colima removes its Docker context when stopping. Docker's context rm treats
+# DOCKER_CONTEXT as the active selection and can reset an unrelated stored
+# context. Lifecycle operations must see the stored selection, not the run's.
+colima_p() { local verb="$1"; shift; env -u DOCKER_CONTEXT -u DOCKER_HOST colima "$verb" --profile "$PROFILE" "$@"; }
 
 # Prints "<cpus> <memory GiB> <disk GiB>" when the profile's VM is running,
 # else nothing.
@@ -123,15 +128,14 @@ install_buildx() {
     return
   fi
   if ! command -v brew &>/dev/null; then
-    warn "docker buildx missing and brew not found — install the docker-buildx plugin manually"
-    return
+    fail "docker buildx missing and brew not found — install the docker-buildx plugin manually"
   fi
   info "installing docker buildx plugin (brew install docker-buildx)..."
   brew install docker-buildx 2>&1 || warn "brew install docker-buildx failed"
   if dk buildx version &>/dev/null; then
     ok "docker buildx ready"
   else
-    warn "docker buildx still not found — add \"cliPluginsExtraDirs\": [\"$(brew --prefix)/lib/docker/cli-plugins\"] to ~/.docker/config.json"
+    fail "docker buildx still not found — add \"cliPluginsExtraDirs\": [\"$(brew --prefix)/lib/docker/cli-plugins\"] to ~/.docker/config.json"
   fi
 }
 
@@ -191,22 +195,18 @@ smoke_test() {
   if dk run --rm hello-world 2>/dev/null | grep -q "Hello from Docker"; then
     ok "hello-world container ran successfully"
   else
-    warn "hello-world smoke test did not produce expected output — daemon may still be starting"
+    fail "hello-world smoke test failed — inspect the selected Docker context before retrying"
   fi
 }
 
 # ---- doctor gate ------------------------------------------------------------
 run_doctor_gate() {
   info "running obench doctor --docker-env preflight..."
-  if command -v obench &>/dev/null; then
-    cd "$REPO_ROOT"
-    if DOCKER_CONTEXT="$(docker_context)" python3 -m obench.doctor --docker-env 2>&1; then
-      ok "obench doctor --docker-env PASSED"
-    else
-      warn "obench doctor --docker-env FAILED — check output above"
-    fi
+  cd "$REPO_ROOT"
+  if DOCKER_CONTEXT="$(docker_context)" python3 -m obench.doctor --docker-env; then
+    ok "obench doctor --docker-env PASSED"
   else
-    warn "obench not on PATH — skipping doctor gate (run from repo: python3 -m obench.doctor --docker-env)"
+    fail "obench doctor --docker-env FAILED — resolve the reported checks; use --provision-only only when campaign qualification will follow"
   fi
 }
 
@@ -221,6 +221,7 @@ main() {
       --restart|--recreate) action="restart" ;;
       --status) action="status" ;;
       --autostart) AUTOSTART=1 ;;
+      --provision-only) PROVISION_ONLY=1 ;;
       --profile)
         [ "$#" -ge 2 ] || fail "--profile needs a name"
         PROFILE="$2"
@@ -271,16 +272,22 @@ main() {
   show_status
   echo ""
 
-  run_doctor_gate
+  if [ "$PROVISION_ONLY" = 0 ]; then
+    run_doctor_gate
+  fi
 
   echo ""
-  ok "colima benchmark environment ready"
+  if [ "$PROVISION_ONLY" = 1 ]; then
+    ok "colima VM provisioned; campaign readiness has not been checked"
+  else
+    ok "colima benchmark environment checks passed; campaign qualification is still required"
+  fi
   # The checks above pinned this VM's context; a run that inherits another
   # active context would use a daemon they never saw.
   info "Runs must target this VM. Set this where the run starts (in a tmux launch"
   info "script, not only in the shell that opens tmux):"
   echo "  export DOCKER_CONTEXT=$(docker_context)"
-  info "Next: obench run --task ... --harness ... --model ..."
+  info "Next: pin runtime images and run obench campaign qualify before campaign launch"
 }
 
 main "$@"
