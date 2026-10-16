@@ -283,7 +283,7 @@ async def run(args):
         if not registered:
             ast.parse(source)
         developer = json.loads((output / 'agent/developer-workflow.json').read_text())
-        required = {'git-baseline-diff', 'search', 'python-tests', 'typescript-check-run', 'typescript-lint', 'native-build', 'json', 'processes', 'cleanup'}
+        required = {'git-baseline-diff', 'git-review-diff', 'search', 'python-tests', 'go-tests', 'typescript-check-run', 'typescript-lint', 'native-build', 'json', 'processes', 'cleanup'}
         if set(developer['workflows']) != required:
             raise RuntimeError('developer workflow checks incomplete')
         # Completion of the single command is independently observed in Codex's
