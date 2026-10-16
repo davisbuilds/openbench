@@ -50,6 +50,14 @@ identities. Keep task source, hidden verifiers and repairs out of dependency
 images. Report unavailable services and relevant failing baseline tests, rather
 than attributing environmental failures to the model.
 
+Check the project's supported OS, not just its language version. Cross-compiling
+macOS-only packages on Linux establishes buildability, not executable tests or
+runtime parity. Preserve historical source instead of patching it to fit the
+harness. Explain the limitation identically to both arms and classify the case
+as platform-limited diagnostic material until a suitable isolated runtime exists.
+Do not pool it with native-workflow cases as evidence of representative review
+performance.
+
 Tests and builds may create untracked artifacts. Full-review packages using the
 sealed descriptor above permit added regular files while protecting every
 supplied file against changes/removal. Legacy packages retain strict scope
