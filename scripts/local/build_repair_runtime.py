@@ -51,7 +51,7 @@ def main():
                 '--security-opt', 'no-new-privileges', '--user', '10001:10001',
                 '--read-only', '--tmpfs', '/tmp:rw,exec,nosuid,nodev,size=512m,mode=1777',
                 '--tmpfs', '/home/solver:rw,nosuid,size=64m,uid=10001,gid=10001',
-                identity, 'python3', '-m', 'obench.repair_devtools', 'check'], text=True)
+                identity, 'bash', '-lc', 'python3 -m obench.repair_devtools check'], text=True)
             receipt = {'image_id': identity, 'tag': args.tag, 'context_sha256': hashes,
                        'codex_version': result.stdout.strip(), 'developer_environment': json.loads(developer)}
             args.receipt.parent.mkdir(parents=True, exist_ok=True)

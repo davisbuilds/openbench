@@ -25,7 +25,7 @@ if args[0] == 'build':
     pathlib.Path(args[args.index('--iidfile') + 1]).write_text('sha256:' + 'a' * 64)
 elif args[-2:] == ['codex', '--version']:
     print('codex-cli 0.162.0')
-elif args[-2:] == ['obench.repair_devtools', 'check']:
+elif args[-3:] == ['bash', '-lc', 'python3 -m obench.repair_devtools check']:
     assert '--read-only' in args and '--tmpfs' in args
     print(json.dumps({'schema': 1, 'versions': {}, 'workflows': []}))
 else:
