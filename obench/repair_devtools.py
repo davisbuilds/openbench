@@ -19,7 +19,7 @@ def run(*args, cwd=None, env=None):
 
 
 def initialize_git(workspace: Path, git_dir: Path):
-    """Create a synthetic baseline containing only the supplied workspace.
+    """Create synthetic history from the supplied workspace and optional diff.
 
     Keep Git objects outside /app so ordinary diffs do not inflate exported
     candidate archives. The regular .git pointer is never submitted for grading.
@@ -27,6 +27,13 @@ def initialize_git(workspace: Path, git_dir: Path):
     workspace, git_dir = workspace.resolve(), git_dir.resolve()
     if any(p.name == '.git' for p in workspace.rglob('*')) or git_dir.exists():
         raise ValueError('supplied Git history is forbidden')
+    review = workspace / '.openbench-review.json'
+    if review.exists():
+        if review.is_symlink() or json.loads(review.read_text()) != {'schema': 1, 'patch': 'review.patch'}:
+            raise ValueError('invalid review Git descriptor')
+        patch = workspace / 'review.patch'
+        if patch.is_symlink() or not patch.is_file() or not patch.stat().st_size:
+            raise ValueError('review requires a regular nonempty review.patch')
     env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
     env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
                GIT_AUTHOR_DATE='2000-01-01T00:00:00Z', GIT_COMMITTER_DATE='2000-01-01T00:00:00Z')
@@ -40,7 +47,22 @@ def initialize_git(workspace: Path, git_dir: Path):
     git('config', 'commit.gpgsign', 'false')
     git('config', 'core.hooksPath', '/dev/null')
     git('add', '--force', '.')
-    git('commit', '--quiet', '--allow-empty', '-m', 'Supplied task baseline')
+    if review.exists():
+        # Reverse only the index; never execute repository code or import objects,
+        # remotes, hooks, identities or messages from the historical repository.
+        candidate_tree = git('write-tree')
+        git('apply', '--reverse', '--cached', '--whitespace=nowarn', '--', 'review.patch')
+        base_tree = git('write-tree')
+        if base_tree == candidate_tree:
+            raise ValueError('review diff has no changes')
+        base = git('commit-tree', base_tree, '-m', 'Supplied review base')
+        candidate = git('commit-tree', candidate_tree, '-p', base, '-m', 'Supplied review candidate')
+        git('update-ref', 'refs/heads/review-base', base)
+        git('update-ref', 'refs/heads/review-candidate', candidate)
+        git('symbolic-ref', 'HEAD', 'refs/heads/review-candidate')
+        git('read-tree', candidate_tree)
+    else:
+        git('commit', '--quiet', '--allow-empty', '-m', 'Supplied task baseline')
 
 
 def initialize_dependencies(workspace: Path):
@@ -77,6 +99,7 @@ def check():
         'bash': ('bash', '--version'), 'jq': ('jq', '--version'),
         'python': ('python3', '--version'), 'pytest': ('pytest', '--version'),
         'node': ('node', '--version'), 'npm': ('npm', '--version'),
+        'go': ('go', 'version'),
         'npx': ('npx', '--version'), 'pnpm': ('pnpm', '--version'),
         'typescript': ('tsc', '--version'), 'tsx': ('tsx', '--version'),
         'eslint': ('eslint', '--version'),
@@ -96,8 +119,22 @@ def check():
         (app / 'example.py').write_text('value = 2\n')
         assert '+value = 2' in run('git', 'diff', cwd=app)
         assert run('rg', 'value = 2', 'example.py', cwd=app) == 'value = 2'
+        review_app = root / 'review'
+        review_app.mkdir()
+        (review_app / 'example.py').write_text('value = 2\n')
+        (review_app / 'review.patch').write_text(run('git', 'diff', cwd=app) + '\n')
+        (review_app / '.openbench-review.json').write_text('{"schema":1,"patch":"review.patch"}')
+        initialize_workspace(review_app, root / 'review-history')
+        assert '+value = 2' in run('git', 'diff', 'review-base', 'HEAD', cwd=review_app)
+        assert run('git', 'rev-list', '--count', 'HEAD', cwd=review_app) == '2'
+        assert run('git', 'status', '--porcelain', cwd=review_app) == ''
         (app / 'test_example.py').write_text('from example import value\ndef test_value():\n    assert value == 2\n')
         run('python3', '-m', 'pytest', '-q', cwd=app)
+        (app / 'go.mod').write_text('module example.test/workflow\n\ngo 1.26\n')
+        (app / 'probe_test.go').write_text('package workflow\nimport "testing"\nfunc TestToolchain(t *testing.T) { if 1+1 != 2 { t.Fatal("arithmetic") } }\n')
+        run('go', 'test', './...', cwd=app)
+        (app / 'go.mod').unlink()
+        (app / 'probe_test.go').unlink()
         (app / 'example.ts').write_text('const value: number = 2; if (value !== 2) throw Error("bad");\n')
         (app / 'package.json').write_text('{"name":"developer-workflow-check","private":true}\n')
         # No project lockfile or install: binaries and packages are preinstalled.
@@ -138,8 +175,8 @@ def check():
         (scratch / 'temporary').write_text('disposable')
         run('rm', '-r', str(scratch))
         assert not scratch.exists()
-    return {'schema': 1, 'versions': versions, 'workflows': ['git-baseline-diff', 'search',
-            'python-tests', 'typescript-check-run', 'typescript-lint', 'native-build', 'json', 'processes', 'cleanup']}
+    return {'schema': 1, 'versions': versions, 'workflows': ['git-baseline-diff', 'git-review-diff', 'search',
+            'python-tests', 'go-tests', 'typescript-check-run', 'typescript-lint', 'native-build', 'json', 'processes', 'cleanup']}
 
 
 def main():

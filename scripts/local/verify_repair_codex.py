@@ -126,7 +126,10 @@ async def run(args):
     target = 'submission/review.json' if review else registered or 'scripts/profiles/__init__.py'
     prefix = '//' if registered else '#'
     command = "set -eu\ntest -n \"${BASH_VERSION:-}\"\ntest \"$(printf '%s ' {alpha,beta})\" = 'alpha beta '\npython3 -m obench.repair_devtools check > /logs/agent/developer-workflow.json\n"
-    command += "test -z \"$(git status --porcelain)\"\ntest \"$(git rev-list --count HEAD)\" = 1\ntest -z \"$(git remote)\"\n"
+    commits = 2 if (app / '.openbench-review.json').is_file() else 1
+    command += f"test -z \"$(git status --porcelain)\"\ntest \"$(git rev-list --count HEAD)\" = {commits}\ntest -z \"$(git remote)\"\n"
+    if commits == 2:
+        command += "git diff --binary --full-index review-base HEAD > /tmp/actual-review.patch\ncmp review.patch /tmp/actual-review.patch\n"
     project_check = getattr(args, 'project_check', None)
     if review and not project_check:
         project_check = 'python3 -m json.tool submission/review.json >/dev/null'

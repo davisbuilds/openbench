@@ -1,5 +1,6 @@
 # Build context is assembled by scripts/local/build_repair_runtime.py.
 # It never contains a task, oracle, home directory, or repository history.
+FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS go
 FROM node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS node
 WORKDIR /opt/repair-deps
 COPY node/package.json node/package-lock.json ./
@@ -14,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       git ripgrep bash jq build-essential curl ca-certificates procps \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=go /usr/local/go /usr/local/go
 COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
@@ -35,8 +37,9 @@ RUN ln -s /opt/repair-deps/node_modules /node_modules \
     && node -e "const DB=require('/node_modules/better-sqlite3'); const db=new DB(':memory:'); db.prepare('SELECT 1').get(); db.close()"
 COPY obench/ /opt/openbench/obench/
 ENV PYTHONPATH=/opt/openbench PYTHONDONTWRITEBYTECODE=1 HOME=/home/solver \
-    PATH=/opt/repair-deps/node_modules/.bin:$PATH \
+    PATH=/usr/local/go/bin:/opt/repair-deps/node_modules/.bin:$PATH \
+    GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOCACHE=/tmp/go-build GOPATH=/tmp/go \
     npm_config_cache=/tmp/npm-cache npm_config_offline=true \
     PIP_NO_INDEX=1 PNPM_HOME=/tmp/pnpm XDG_CACHE_HOME=/tmp/cache
-LABEL org.openbench.developer-environment="3"
+LABEL org.openbench.developer-environment="4"
 WORKDIR /app

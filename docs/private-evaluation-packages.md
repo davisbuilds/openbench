@@ -63,6 +63,10 @@ candidate miss. These protocol checks do not replace task-quality controls.
 
 ### Review artifacts
 
+Read [task fidelity](review-task-fidelity.md) before selecting source and review
+scope. It covers full review Git reconstruction, normal context, dependencies,
+matched treatments and semantic adjudication.
+
 `artifact-review-v1` observes a review report as data; it never executes submitted
 source or starts a browser. Every case request is exactly `{"mode":"review"}`.
 Cases and acceptance rules remain evaluator-owned, with at most 64 cases.
@@ -87,7 +91,9 @@ It compares the complete submitted workspace to the approved initial file hashes
 excluding `submission/` outputs and generated `.git/` state. The runtime's `.git`
 file is exempt only for the exact pointer `gitdir: /tmp/openbench-workspace.git`
 followed by a newline; altered pointers remain source drift. Added, removed and
-changed source bytes are recorded in `scope_drift`. Any scope drift forces all
+changed source bytes are recorded in `scope_drift`. Full-review packages with a
+sealed `.openbench-review.json` allow additional regular build/test artifacts;
+all originally supplied files and the generated Git pointer remain protected. Any scope drift forces all
 affected checks to fail even if the evaluator returns pass. File permissions
 are not part of this byte comparison. Run checks that create caches or scratch
 outside the source tree. Malformed or missing reports return `ok:false`; these

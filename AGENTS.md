@@ -58,6 +58,11 @@ import. Renew controls when runtime or adapter bytes change. These checks do
 not establish difficulty calibration or admit an unattended campaign.
 Treat scores from an unproven boundary as diagnostic, not golden-set evidence.
 
+Before authoring or revising review/repair evaluations, read
+[task fidelity](docs/review-task-fidelity.md). Check the actual exported review
+scope, Git comparison, ordinary instructions/tests and offline tool workflows;
+package validity and checker polarity do not establish realism.
+
 ## What OpenBench is
 
 A benchmark framework for comparing coding-agent **harnesses** (codex, pi,

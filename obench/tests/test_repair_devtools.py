@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -40,6 +41,53 @@ class WorkspaceGitTests(unittest.TestCase):
             self.assertTrue((app / '.git').is_file())
             self.assertEqual((app / '.git').read_text(), f'gitdir: {(root / "history").resolve()}\n')
             self.assertFalse(list((root / 'history/hooks').glob('*')))
+
+    def test_review_has_real_base_candidate_diff_and_no_other_history(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'keep.py').write_text('value = 1\n')
+            (source / 'deleted').write_text('before\n')
+            initialize_git(source, root / 'source-history')
+            (source / 'keep.py').write_text('value = 2\n')
+            (source / 'deleted').unlink()
+            (source / 'new.bin').write_bytes(b'\x00\x01new')
+            (source / 'executable').write_text('#!/bin/sh\n')
+            (source / 'executable').chmod(0o755)
+            subprocess.run(['git', '-C', str(source), 'add', '--all'], check=True)
+            patch = subprocess.check_output(['git', '-C', str(source), 'diff', '--cached', '--binary', '--full-index'])
+            app = root / 'app'
+            app.mkdir()
+            for name in ('keep.py', 'new.bin', 'executable'):
+                (app / name).write_bytes((source / name).read_bytes())
+                (app / name).chmod((source / name).stat().st_mode & 0o777)
+            (app / 'review.patch').write_bytes(patch)
+            (app / '.openbench-review.json').write_text(json.dumps({'schema': 1, 'patch': 'review.patch'}))
+            initialize_workspace(app, root / 'history')
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(app), *args])
+            self.assertEqual(git('rev-list', '--count', 'HEAD').strip(), b'2')
+            self.assertEqual(git('show', 'review-base:keep.py'), b'value = 1\n')
+            self.assertEqual(git('show', 'HEAD:keep.py'), b'value = 2\n')
+            self.assertEqual(git('diff', '--binary', '--full-index', 'review-base', 'HEAD'), patch)
+            self.assertEqual(git('status', '--porcelain'), b'')
+            self.assertEqual(git('remote'), b'')
+            self.assertEqual(git('rev-parse', 'review-candidate'), git('rev-parse', 'HEAD'))
+            self.assertEqual((app / 'new.bin').read_bytes(), b'\x00\x01new')
+            self.assertFalse((app / 'deleted').exists())
+
+    def test_review_rejects_invalid_or_outside_patch(self):
+        for spec, patch in [({'schema': 1, 'patch': '../outside'}, b'bad'),
+                            ({'schema': 1, 'patch': 'review.patch'}, b'bad')]:
+            with self.subTest(spec=spec), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                app = root / 'app'
+                app.mkdir()
+                (app / 'review.patch').write_bytes(patch)
+                (app / '.openbench-review.json').write_text(json.dumps(spec))
+                with self.assertRaises((ValueError, RuntimeError)):
+                    initialize_workspace(app, root / 'history')
 
     def test_refuses_supplied_git_history(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -63,7 +63,11 @@ def observe(files, protected):
               if not name.startswith(('submission/', '.git/'))
               and not (name == '.git' and data == GIT_POINTER)}
     drift = sorted('removed:' + n for n in protected.keys() - actual.keys())
-    drift += sorted('added:' + n for n in actual.keys() - protected.keys())
+    # Full review workspaces opt in through their sealed descriptor. Builds and
+    # tests may create untracked files; changes to supplied bytes still fail.
+    # Legacy selected-source packages retain their original strict scope rule.
+    drift += sorted('added:' + n for n in actual.keys() - protected.keys()
+                    if '.openbench-review.json' not in protected or n == '.git')
     drift += sorted('changed:' + n for n in actual.keys() & protected.keys() if actual[n] != protected[n])
     try:
         findings = review_report(files[ARTIFACT])

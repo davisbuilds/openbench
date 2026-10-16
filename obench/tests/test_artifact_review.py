@@ -63,6 +63,18 @@ class ArtifactObserverTests(unittest.TestCase):
         self.assertEqual(result['value']['scope_drift'],
                          ['removed:removed.py', 'added:extra.py', 'changed:src/example.py'])
 
+    def test_full_review_allows_build_outputs_but_protects_supplied_source(self):
+        descriptor = b'{"schema":1,"patch":"review.patch"}'
+        protected = {**self.protected, '.openbench-review.json': hashlib.sha256(descriptor).hexdigest()}
+        files = {**self.files, '.openbench-review.json': descriptor, 'dist/example.js': b'compiled'}
+        self.assertEqual(review.observe(files, protected)['value']['scope_drift'], [])
+        files['src/example.py'] = b'changed'
+        self.assertEqual(review.observe(files, protected)['value']['scope_drift'], ['changed:src/example.py'])
+        del files['src/example.py']
+        self.assertEqual(review.observe(files, protected)['value']['scope_drift'], ['removed:src/example.py'])
+        # A solver cannot opt an older package into the new behavior.
+        self.assertIn('added:.openbench-review.json', review.observe(files, self.protected)['value']['scope_drift'])
+
     def test_only_the_exact_runtime_git_pointer_is_exempt(self):
         files = {**self.files, '.git': b'gitdir: /tmp/openbench-workspace.git\n'}
         self.assertEqual(review.observe(files, self.protected)['value']['scope_drift'], [])
