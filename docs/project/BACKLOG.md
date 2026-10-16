@@ -22,6 +22,21 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
+### Align broad Docker doctor diagnostics with selected campaigns
+
+- **What**: `doctor --docker-env` checks every authentication lane and compares
+  guest-visible `MemTotal` directly with the configured VM memory floor. Missing
+  unrelated accounts and the VM kernel's memory reservation can therefore fail
+  the broad diagnostic for an otherwise usable selected campaign.
+- **Evidence**: `evaluate_docker_env` includes all `_AUTH_LANES`;
+  `check_docker_resources` requires the full configured GiB in Docker's report.
+  A VM's assigned memory and its guest-visible memory are different quantities.
+- **Next**: Scope authentication to sealed suite intent and distinguish allocation
+  from measured usable headroom. Until then, explicit `--provision-only` performs
+  VM checks; current pinned-image and campaign qualification evidence remains
+  required before dispatch. Never treat skipped doctor checks as passed.
+
+
 ### Calibrate UI score interpretation and replay historical submissions
 
 - **What**: Keep strict completion, per-check diagnostics and blind design
