@@ -69,11 +69,18 @@ class ReviewContracts(unittest.TestCase):
                 prepare([source], root/'tampered')
 
     def test_private_artifact_requires_supported_browser_protocol(self):
-        variants = [None, {}, {'protocol': 'other'},
-                    {'protocol': 'browser-observations-v1', 'evaluation_package': {
-                        'evaluation': {'backend': 'unknown'}}},
-                    {'protocol': 'browser-observations-v1', 'evaluation_package': {
-                        'evaluation': {'backend': 'activity-explorer-v2'}}}]
+        valid = {'protocol': 'browser-observations-v1', 'evaluation_package': {
+            'sha256': 'a'*64, 'evaluation': {'schema': 1, 'backend': 'activity-explorer-v2'}}}
+        variants = [None, {}, {**valid, 'protocol': 'other'}]
+        for section, field, bad in [('package', 'sha256', 'not-a-pin'),
+                                    ('descriptor', 'backend', 'unknown'),
+                                    ('descriptor', 'schema', True)]:
+            value = json.loads(json.dumps(valid))
+            target = value['evaluation_package']
+            if section == 'descriptor':
+                target = target['evaluation']
+            target[field] = bad
+            variants.append(value)
         for extra in variants:
             with self.subTest(extra=extra), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
