@@ -72,6 +72,29 @@ def fixture(name):
     return {'mode': name if name in ('loading', 'retry') else 'list', 'data': [] if name == 'empty' else rows}
 
 
+def reviewable_browser_receipt(receipt):
+    """Select the viewer protocol without loading or trusting private evaluators.
+
+    This is compatibility detection, not independent receipt authentication.
+    Preparation still verifies every submitted source hash below.
+    """
+    if receipt.get('oracle_id') in ('activity-explorer-v1', 'activity-explorer-v2'):
+        return True
+    if (receipt.get('oracle_id') != 'private-evaluation'
+            or receipt.get('protocol') != 'browser-observations-v1'):
+        return False
+    package = receipt.get('evaluation_package')
+    if not isinstance(package, dict):
+        return False
+    descriptor = package.get('evaluation')
+    pin = package.get('sha256')
+    return (isinstance(descriptor, dict)
+            and type(descriptor.get('schema')) is int and descriptor['schema'] == 1
+            and descriptor.get('backend') == 'activity-explorer-v2'
+            and isinstance(pin, str) and len(pin) == 64
+            and all(c in '0123456789abcdef' for c in pin))
+
+
 def prepare(trials, output, *, keep_order=False):
     if not 1 <= len(trials) <= 26:
         raise ValueError('provide between 1 and 26 trials')
@@ -82,8 +105,8 @@ def prepare(trials, output, *, keep_order=False):
     for i, trial in enumerate(entries):
         receipt_bytes = (trial / 'verifier/sandbox-grading.json').read_bytes()
         receipt = json.loads(receipt_bytes)['grading']
-        if receipt.get('oracle_id') not in ('activity-explorer-v1', 'activity-explorer-v2'):
-            raise ValueError('review supports activity-explorer-v1/v2 artifacts')
+        if not reviewable_browser_receipt(receipt):
+            raise ValueError('review supports activity-explorer-v1/v2 artifacts and pinned private activity-explorer-v2 artifacts')
         expected = receipt.get('source_sha256')
         if not isinstance(expected, dict) or not expected or any(not k.startswith('web/') for k in expected):
             raise ValueError('missing browser source hashes')
