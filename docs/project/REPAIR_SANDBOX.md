@@ -61,13 +61,14 @@ archives, preserving project guidance and executable file modes.
 
 ### Developer environment (default for new repairs)
 
-`build_repair_runtime.py` builds developer environment revision 3, tagged
-`dev-v3-codex-0.162.0` for convenience. Suites must use its immutable image ID.
+`build_repair_runtime.py` builds developer environment revision 4, tagged
+`dev-v4-codex-0.162.0` for convenience. Suites must use its immutable image ID.
 The build receipt records the context hashes, effective tool versions and passing
 nonroot, read-only-root, offline developer workflow checks. An image digest is
 the exact treatment identity; the label is a human-readable feature revision.
 
 - Shared tools: Git, ripgrep, Bash, jq, Python/pytest, Node, npm/npx, pnpm,
+  Go 1.26.7 (revision 4),
   make, GCC/G++, curl and process inspection.
 - Backend profile: locked npm dependencies including TypeScript 6.0.3,
   tsx 4.23.5, SQLite and relevant type declarations. Revision 2 adds ESLint
@@ -81,10 +82,16 @@ the exact treatment identity; the label is a human-readable feature revision.
   through the immutable `/node_modules` ancestor; exports contain no dependency
   symlinks. Actual-harness workflow receipts bind the exact task/image, command
   and execution logs; see [repair validation](../repair-validation.md).
-- Every workspace gets one synthetic Git baseline, no remotes or original
+- Repair workspaces get one synthetic Git baseline, no remotes or original
   history. Git objects live in private scratch space rather than the exported
   source archive. A regular `.git` pointer supports status/diff and is excluded
   from grading. Supplied `.git` history is rejected before candidate execution.
+- Full reviews can supply `.openbench-review.json` and a binary `review.patch`
+  to reconstruct only the base and candidate commits. See
+  [task fidelity](../review-task-fidelity.md). Revision 4 checks this Git workflow
+  and offline Go compilation/tests. Project-specific Go module caches and
+  lockfile-matching Node dependencies still need provisioning and task-level
+  workflow checks; the generic image does not establish dependency fidelity.
 - Solver scratch `/tmp` is writable, executable, bounded to 512 MiB and remains
   private with `nosuid,nodev`; this permits compiling and running scratch probes.
   The broker's scratch remains non-executable. Credentials, host files, hidden
