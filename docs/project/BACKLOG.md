@@ -154,6 +154,17 @@ the PR, not as a "resolved" note here).
   HOME helper-alias warning through admission controls before treating it as a
   missing capability. Keep host/history/oracle isolation intact.
 
+#### Platform fidelity for historical tasks
+- **What**: the isolated repair runtime is Linux; a supported language toolchain
+  does not make OS-specific project tests executable there.
+- **Evidence**: platform-specific system-call types can prevent a package from
+  compiling for Linux even when its dependencies are available offline. A
+  successful cross-compile still cannot execute the target-platform tests.
+- **Next**: keep such cases explicitly diagnostic under
+  [task fidelity](../review-task-fidelity.md). Revisit an isolated matching-OS
+  execution route when those cases are needed for representative comparisons;
+  otherwise select native cases. Preserve host/history/oracle isolation.
+
 #### Full-checkout contract admission
 - **What**: check compatibility among task instructions, historical public tests,
   and the oracle's caller interface before treating misses as model difficulty.
