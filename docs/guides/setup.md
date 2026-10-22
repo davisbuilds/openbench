@@ -127,12 +127,16 @@ Install the bridge once, outside the repo:
 ```bash
 OPENBENCH_HOME=${OPENBENCH_HOME:-$HOME/.openbench}
 uv venv --python 3.12 "$OPENBENCH_HOME/bridge-venv"
-uv pip install --exclude-newer '7 days' \
+uv pip install --exclude-newer '7 days' --exclude-newer-package 'certifi=2026-10-21T00:00:00Z' \
   --python "$OPENBENCH_HOME/bridge-venv/bin/python" 'litellm[proxy]'
 ```
 
 `--exclude-newer '7 days'` skips releases from the last week, so a hijacked
 LiteLLM release is usually caught and yanked before this install can pick it up.
+It needs uv 0.9.17 or later; older uv rejects the relative duration. The
+dated certifi exception admits certifi 2026.10.19, which distrusts the
+compromised eMudhra/emSign root (GHSA-6q48-6c7w-9gw2) but is inside the window;
+drop it after 2026-10-28.
 
 Then start it in the foreground before Codex open-model runs:
 

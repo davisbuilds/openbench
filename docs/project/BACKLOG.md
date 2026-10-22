@@ -22,6 +22,16 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
+### Drop the certifi exception from the bridge install (revisit 2026-10-28)
+
+- **What:** `obench/openmodel_bridge.sh` and `docs/guides/setup.md` pass
+  `--exclude-newer-package 'certifi=2026-10-21T00:00:00Z'` so the 7-day cooldown still admits
+  certifi 2026.10.19 (GHSA-6q48-6c7w-9gw2).
+- **Why:** the dated cutoff never advances; once 2026.10.19 is older than the window it only
+  blocks later certifi releases.
+- **Next:** on or after 2026-10-28, remove the flag from both places and confirm a dry-run bridge
+  install still resolves certifi 2026.10.19 or later.
+
 ### Align broad Docker doctor diagnostics with selected campaigns
 
 - **What**: `doctor --docker-env` checks every authentication lane and compares
