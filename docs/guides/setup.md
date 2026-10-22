@@ -127,8 +127,12 @@ Install the bridge once, outside the repo:
 ```bash
 OPENBENCH_HOME=${OPENBENCH_HOME:-$HOME/.openbench}
 uv venv --python 3.12 "$OPENBENCH_HOME/bridge-venv"
-uv pip install --python "$OPENBENCH_HOME/bridge-venv/bin/python" 'litellm[proxy]'
+uv pip install --exclude-newer '7 days' \
+  --python "$OPENBENCH_HOME/bridge-venv/bin/python" 'litellm[proxy]'
 ```
+
+`--exclude-newer '7 days'` skips releases from the last week, so a hijacked
+LiteLLM release is usually caught and yanked before this install can pick it up.
 
 Then start it in the foreground before Codex open-model runs:
 

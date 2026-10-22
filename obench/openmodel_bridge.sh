@@ -45,7 +45,7 @@ if [ ! -x "$VENV/bin/litellm" ]; then
   echo "ERROR: litellm not found at $VENV/bin/litellm" >&2
   echo "Install it (outside the repo):" >&2
   echo "  uv venv --python 3.12 $VENV" >&2
-  echo "  uv pip install --python $VENV/bin/python 'litellm[proxy]'" >&2
+  echo "  uv pip install --exclude-newer '7 days' --python $VENV/bin/python 'litellm[proxy]'" >&2
   exit 1
 fi
 if [ ! -f "$CONFIG" ]; then
