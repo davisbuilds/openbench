@@ -46,9 +46,36 @@ if [ ! -x "$VENV/bin/litellm" ]; then
   echo "Install it (outside the repo):" >&2
   echo "  uv venv --python 3.12 $VENV" >&2
   echo "  uv pip install --exclude-newer '7 days' --exclude-newer-package 'certifi=2026-10-21T00:00:00Z' \\" >&2
-  echo "    --python $VENV/bin/python 'litellm[proxy]'" >&2
+  echo "    --python $VENV/bin/python 'litellm[proxy]!=1.107.0'" >&2
   exit 1
 fi
+
+# Inspect files from the shell before loading keys or starting this venv's
+# Python: LiteLLM 1.107.0 executes its payload at interpreter startup.
+refuse_installation() {
+  echo "ERROR: unsafe or unverified LiteLLM bridge installation; refusing to start." >&2
+  echo "Do not run this venv's Python or pip. Investigate startup hooks and rebuild the venv from vetted artifacts." >&2
+  echo "If LiteLLM 1.107.0 was ever installed, treat the host as compromised and rotate exposed credentials." >&2
+  exit 1
+}
+shopt -s nullglob
+site_dirs=("$VENV"/lib/python*/site-packages "$VENV"/Lib/site-packages)
+[ "${#site_dirs[@]}" -gt 0 ] || refuse_installation
+metadata=()
+for site in "${site_dirs[@]}"; do
+  for indicator in "$site"/litellm-1.107.0.dist-info "$site"/cook.pth "$site"/cook.py \
+      "$site"/sitecustomize.py "$site"/__pycache__/cook*.pyc "$site"/__pycache__/sitecustomize*.pyc; do
+    [ ! -e "$indicator" ] || refuse_installation
+  done
+  metadata+=("$site"/litellm-*.dist-info/METADATA)
+done
+shopt -u nullglob
+[ "${#metadata[@]}" -eq 1 ] || refuse_installation
+installed_version="$(awk '/^Version: / {sub(/\r$/, "", $2); print $2}' "${metadata[0]}")"
+[[ "$installed_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+[a-zA-Z0-9.+-]*$ ]] || refuse_installation
+case "$installed_version" in
+  1.107.0*) refuse_installation ;;
+esac
 if [ ! -f "$CONFIG" ]; then
   echo "ERROR: bridge config not found at $CONFIG" >&2
   exit 1

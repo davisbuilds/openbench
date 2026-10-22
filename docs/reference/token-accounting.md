@@ -66,6 +66,11 @@ The probes used isolated work directories and isolated HOME/config where support
 
 Start bridge on `:4242`:
 
+The commands below record a historical probe. For routine startup use the
+guarded `obench/openmodel_bridge.sh` entry point and follow the
+[existing-installation security check](../guides/setup.md#open-model-bridge-for-codex)
+before running an older bridge environment or sourcing its provider keys.
+
 ```bash
 source ~/.openbench/keys.env
 export PYTHONPATH="$PWD/.worker/proofs:$PWD/bench/bridge${PYTHONPATH:+:$PYTHONPATH}"
