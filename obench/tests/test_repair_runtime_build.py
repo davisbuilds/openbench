@@ -51,3 +51,38 @@ else:
             self.assertEqual(modes['obench/__init__.py'], 0o644)
             self.assertEqual(modes['obench/sandbox_gateway.py'], 0o644)
             self.assertEqual(modes['obench/repair_devtools.py'], 0o644)
+
+
+class BrowserRuntimeBuildTests(unittest.TestCase):
+    def test_supported_base_revisions_build_and_future_revision_is_rejected(self):
+        root = Path(__file__).resolve().parents[2]
+        for revision in ('3', '4', '5'):
+            with self.subTest(revision=revision), tempfile.TemporaryDirectory() as directory:
+                temp = Path(directory)
+                docker = temp/'docker'
+                docker.write_text('#!/usr/bin/env python3\n'+'''
+import json, os, pathlib, sys
+args = sys.argv[1:]
+if args[:2] == ['image', 'inspect']:
+    print(json.dumps([{'Id': 'sha256:'+'a'*64, 'Config': {
+        'Labels': {'org.openbench.developer-environment': os.environ['TEST_BASE_REVISION']}}}]))
+elif args[0] == 'build':
+    pathlib.Path(args[args.index('--iidfile')+1]).write_text('sha256:'+'b'*64)
+elif args[0] == 'tag' or args[:2] == ['image', 'rm']:
+    pass
+else:
+    raise AssertionError(args)
+''')
+                docker.chmod(0o755)
+                receipt = temp/'receipt.json'
+                result = subprocess.run([sys.executable,
+                    str(root/'scripts/local/build_browser_runtime.py'),
+                    '--base-image', 'sha256:'+'a'*64, '--receipt', str(receipt)],
+                    env=dict(os.environ, PATH=str(temp)+os.pathsep+os.environ['PATH'],
+                             TEST_BASE_REVISION=revision), capture_output=True, text=True)
+                if revision == '5':
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(receipt.exists())
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(receipt.read_text())['base_image_id'], 'sha256:'+'a'*64)
