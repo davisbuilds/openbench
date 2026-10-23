@@ -43,7 +43,7 @@
     "data/tb-gpt56sol-2026-07-10/tb-gpt56sol-n3.jsonl": "b353a129c2a78a1d71b2bfa995338ecf6df34afd4ef2ea49b367ae0bc4f528c1",
     "data/tb-gpt56sol-2026-07-10/tb-gpt56sol-stats.md": "1ea43a69c8de43d13f7a794e5d824ed27d1d5adefb9369b1b511052c3b0513ec",
     "data/tb-open-n3-2026-07-09/tb-open-n3-stats.md": "deb72d4ef4a5386cfaf8ccc2bf92a88b79d18c6ee47dbfa3ed03dabcd43aa4c3",
-    "docker/repair-sandbox/Dockerfile": "0a8b012b1397d696935154e30ba54348cf9092b6409abd361d7b28493f4506a9",
+    "docker/repair-sandbox/Dockerfile": "ad803dfbf98ee6b72a03d764cafe0445fd93b30d5b4e320a2ecbbfa1cd2d4a4c",
     "experiments/candidates/deepagents-code.toml": "ad995fc938a0daac98126d4b748a085993136697fde88c7457e1fbbe5d4d5da1",
     "experiments/candidates/omp.toml": "5cc8300c9743a1247a4d1ae63d57e1fac55592b270f9f4f22e847dbbc85c8597",
     "obench/tests/test_gateway_probe_publish.py": "5495e378c36d0000b9c49550854588f05c955213e51c3c7fa14795058d1d71ad",
@@ -229,7 +229,7 @@
     "benchmarks/imported/terminal-bench/count-call-stack/workspace/log.stack": "6f73619ff6956bc1ee1ae2a9c6813cfb792c4b058eeb42e54a26da6e4339ed40",
     "benchmarks/local/engram-batch-pr1/checker_data/upstream/internal/scope/scope_test.go": "557b5af0a25cd97a9ee83da67cbd40d74164f68c233d49d9c0f29de3d75bc2b4",
     "benchmarks/local/engram-batch-pr1/checker_data/upstream/internal/slug/slug_test.go": "a33df31831af95d5ff9b8b1bb4ab9c515ad0f9b8bac538e5ec6b08a137d692d2",
-    "scripts/local/build_repair_runtime.py": "19e094260b9609f69c54c1075ded8e0c6daeef2f7236a5cac76211d1f7b8c3cb"
+    "scripts/local/build_repair_runtime.py": "da12ecedc54821548bffeae56134d0dfa771dac40755eaea3f8f0709efdcf619"
   },
   "allowed_home_segments": [
     "solver"
