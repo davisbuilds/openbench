@@ -16,6 +16,24 @@ class BrowserV3Contracts(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('OBENCH_BROWSER_IMAGE'), 'requires pinned browser Docker image')
 class AccessibleNameTests(unittest.TestCase):
+    def test_uppercase_labels_work_through_full_interaction_driver(self):
+        from scripts.ci.browser_quality_fixtures import HTML, JS, CSS
+        from obench.harbor_sandbox import pack_files
+        from obench.repair_worker import run_worker
+        from obench.repair_oracles.activity_explorer_v2 import cases, reasons
+        html = HTML
+        for label in ('Activity details', 'Close details', 'Search activities', 'Status', 'Retry'):
+            html = html.replace(label, label.upper())
+        selected = [c for c in cases() if c[0] in ('detail', 'keyboard', 'retry', 'combined-filter')]
+        self.assertEqual(len(selected), 4)
+        files = {'web/index.html': html.encode(), 'web/app.js': JS.encode(), 'web/style.css': CSS.encode()}
+        rows, _ = run_worker(os.environ['OBENCH_BROWSER_IMAGE'], pack_files(files),
+                             [c[2] for c in selected], program=v3.program(), timeout=90, browser=True)
+        for (name, _, request), row in zip(selected, rows, strict=True):
+            with self.subTest(check=name):
+                self.assertTrue(row['ok'], row.get('error'))
+                self.assertEqual(reasons(name, row['value'], request), [])
+
     def test_css_casing_accepts_valid_controls_but_rejects_missing_and_ambiguous(self):
         from obench.repair_worker import run_worker
         for version, module in [('v2', v2), ('v3', v3)]:
