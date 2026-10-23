@@ -73,6 +73,26 @@ class CampaignPackageTests(unittest.TestCase):
         path.write_text(text)
         return suite_run.compile_suite(path)
 
+    def test_v3_campaign_requires_its_observer_fingerprint(self):
+        import copy
+        from obench import stats
+        files = fixture()
+        descriptor = json.loads(files['evaluation.json'])
+        descriptor.update(backend='activity-explorer-v3', oracle_revision=2)
+        files['evaluation.json'] = json.dumps(descriptor).encode()
+        self.archive = self.root/'v3.tar'
+        self.sha = _write(files, {n: 0o644 for n in files}, self.archive, 'evaluation', {})
+        self.auth = package_campaign.pin(self.archive, self.sha, True)
+        self.task = self.root/'synthetic-control-c1-o2'
+        package_campaign.export_task(self.auth.load(), self.task)
+        compiled = self.compile()
+        stats._validate_suite_manifest_shape(compiled.manifest, compiled.manifest_sha256)
+        tampered = copy.deepcopy(compiled.manifest)
+        for name in ('obench.browser_worker_v3', 'obench.repair_oracles.activity_explorer_v3'):
+            tampered['sandbox']['implementation_sha256'].pop(name)
+        with self.assertRaises(ValueError):
+            stats._validate_suite_sandbox_policy(tampered)
+
     def test_canonical_job_binds_pin_and_manifest_is_readable(self):
         from obench import suite_run, stats
         compiled = self.compile()
