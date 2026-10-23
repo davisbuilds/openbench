@@ -22,10 +22,18 @@ def main():
         (context / 'node').mkdir()
         for name in ('package.json', 'package-lock.json'):
             shutil.copyfile(ROOT / 'docker/repair-sandbox/node' / name, context / 'node' / name)
+        (context / 'tools').mkdir()
+        for name in ('package.json', 'package-lock.json'):
+            shutil.copyfile(ROOT / 'docker/repair-sandbox/tools' / name, context / 'tools' / name)
         (context / 'obench').mkdir()
         (context / 'obench/__init__.py').write_text('')
         shutil.copyfile(ROOT / 'obench/sandbox_gateway.py', context / 'obench/sandbox_gateway.py')
         shutil.copyfile(ROOT / 'obench/repair_devtools.py', context / 'obench/repair_devtools.py')
+        shutil.copyfile(ROOT / 'obench/runtime_trust.py', context / 'obench/runtime_trust.py')
+        (context / 'trust').mkdir()
+        shutil.copyfile(ROOT / 'docker/repair-sandbox/trust/blocked-root.pem', context / 'trust/blocked-root.pem')
+        (context / 'python').mkdir()
+        shutil.copyfile(ROOT / 'docker/repair-sandbox/python/requirements.txt', context / 'python/requirements.txt')
         # Campaign launchers intentionally use umask 077. These are public
         # runtime modules, and the confined UID must be able to import them.
         for path in context.rglob('*'):
