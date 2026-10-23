@@ -12,9 +12,9 @@ DRIVER = v2.DRIVER.replace('async nodes(role,name,fold=false)',
 # Playwright resolves DOM names while CDP can expose CSS-transformed names.
 # Both interaction and authoritative observation must permit the same casing.
 for label in ('Activity details', 'Close details', 'Status', 'Retry'):
-    DRIVER = DRIVER.replace("name:'" + label + "',exact:true", "name:/^" + label + "$/i")
+    DRIVER = DRIVER.replace("name:'" + label + "',exact:true", "name:/^\\s*" + r'\s+'.join(label.split()) + "\\s*$/i")
 DRIVER = DRIVER.replace("getByLabel('Search activities',{exact:true})",
-                        "getByLabel(/^Search activities$/i)")
+                        r"getByLabel(/^\s*Search\s+activities\s*$/i)")
 OBSERVER = DRIVER[DRIVER.index('class Observer'):DRIVER.index('async function visibleTitles')]
 
 

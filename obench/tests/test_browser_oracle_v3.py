@@ -24,6 +24,10 @@ class AccessibleNameTests(unittest.TestCase):
         html = HTML
         for label in ('Activity details', 'Close details', 'Search activities', 'Status', 'Retry'):
             html = html.replace(label, label.upper())
+        # Unlike exact string labels, Playwright regex labels preserve surrounding
+        # whitespace from ordinary indented, nested HTML. Exercise that path.
+        html = html.replace('<label>SEARCH ACTIVITIES<input type="search" aria-label="SEARCH ACTIVITIES">',
+                            '<label>\n  <span>SEARCH ACTIVITIES</span>\n  <input type="search">\n')
         selected = [c for c in cases() if c[0] in ('detail', 'keyboard', 'retry', 'combined-filter')]
         self.assertEqual(len(selected), 4)
         files = {'web/index.html': html.encode(), 'web/app.js': JS.encode(), 'web/style.css': CSS.encode()}
