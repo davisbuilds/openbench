@@ -48,6 +48,50 @@ class ReviewContracts(unittest.TestCase):
             prepare([trial(root/'trial',oracle='activity-explorer-v2')],root/'bundle')
             self.assertEqual(set(load_bundle(root/'bundle')[0]['candidates']), {'A'})
 
+    def test_private_browser_artifact_is_reviewable_without_private_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = trial(root/'trial', oracle='private-evaluation')
+            path = source/'verifier/sandbox-grading.json'
+            receipt = json.loads(path.read_text())
+            receipt['grading'].update(protocol='browser-observations-v1', evaluation_package={
+                'sha256': 'a'*64, 'evaluation': {'schema': 1, 'id': 'synthetic-private',
+                'case_revision': 1, 'oracle_revision': 1, 'split': 'development',
+                'backend': 'activity-explorer-v2'}})
+            path.write_text(json.dumps(receipt))
+            prepare([source], root/'bundle')
+            bundle, _ = load_bundle(root/'bundle')
+            self.assertEqual(set(bundle['candidates']), {'A'})
+            self.assertNotIn('synthetic-private', json.dumps(bundle))
+            self.assertNotIn('evaluation_package', json.dumps(bundle))
+            (source/'artifacts/workspace/web/app.js').write_text('changed')
+            with self.assertRaisesRegex(ValueError, 'differs'):
+                prepare([source], root/'tampered')
+
+    def test_private_artifact_requires_supported_browser_protocol(self):
+        valid = {'protocol': 'browser-observations-v1', 'evaluation_package': {
+            'sha256': 'a'*64, 'evaluation': {'schema': 1, 'backend': 'activity-explorer-v2'}}}
+        variants = [None, {}, {**valid, 'protocol': 'other'}]
+        for section, field, bad in [('package', 'sha256', 'not-a-pin'),
+                                    ('descriptor', 'backend', 'unknown'),
+                                    ('descriptor', 'schema', True)]:
+            value = json.loads(json.dumps(valid))
+            target = value['evaluation_package']
+            if section == 'descriptor':
+                target = target['evaluation']
+            target[field] = bad
+            variants.append(value)
+        for extra in variants:
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source = trial(root/'trial', oracle='private-evaluation')
+                path = source/'verifier/sandbox-grading.json'
+                value = json.loads(path.read_text())
+                value['grading'].update(extra or {})
+                path.write_text(json.dumps(value))
+                with self.assertRaisesRegex(ValueError, 'review supports'):
+                    prepare([source], root/'bundle')
+
     def test_prepare_freezes_and_checks_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -153,7 +197,13 @@ class ReviewBrowserJourney(unittest.TestCase):
     def test_shared_api_and_confinement(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            prepare([trial(root / 'trial', hostile=True)], root / 'bundle')
+            private = trial(root/'private', oracle='private-evaluation')
+            receipt_path = private/'verifier/sandbox-grading.json'
+            receipt = json.loads(receipt_path.read_text())
+            receipt['grading'].update(protocol='browser-observations-v1', evaluation_package={
+                'sha256': 'b'*64, 'evaluation': {'schema': 1, 'backend': 'activity-explorer-v2'}})
+            receipt_path.write_text(json.dumps(receipt))
+            prepare([trial(root / 'trial', hostile=True), private], root / 'bundle', keep_order=True)
             session = root / 'session'
             with (root / 'server.log').open('w') as log:
                 proc = subprocess.Popen([sys.executable, '-m', 'obench', 'review', 'serve', str(root / 'bundle'),
@@ -223,6 +273,12 @@ class ReviewBrowserJourney(unittest.TestCase):
                             retry = next(c for c in value['controls'] if c['name'] == 'Retry')
                             value = act({'action': 'click', 'ref': retry['ref']})
                             self.assertIn('Review the release checklist', value['text'])
+                    value = act({'action': 'reset', 'candidate': 'B', 'fixture': 'everyday',
+                                 'viewport': {'width': 390, 'height': 844}})
+                    self.assertIn('Review the release checklist', value['text'])
+                    button = next(c for c in value['controls'] if c['name'] == 'Review the release checklist')
+                    value = act({'action': 'click', 'ref': button['ref']})
+                    self.assertIn('Activity details', value['accessibility'])
                     old = status['seq'] - 1
                     with self.assertRaisesRegex(ValueError, 'stale snapshot'):
                         client(session, 'act', {'action': 'key', 'key': 'Tab', 'seq': old})

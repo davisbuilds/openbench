@@ -122,13 +122,34 @@ The default Docker image pins and installs the container-supported CLIs (`codex`
 
 `pi`, `opencode`, and `claude` can call the open models directly through their adapters. `codex` requires a local Responses-to-Chat bridge because Codex custom providers speak the Responses API while the tested vendors expose Chat Completions.
 
-Install the bridge once, outside the repo:
+For an existing installation, do not run its Python or pip to inspect it first.
+The [2026-10-21 LiteLLM incident](https://docs.litellm.ai/blog/security-incident-oct-21-2026)
+affected version 1.107.0, with payloads triggered at Python startup. If that
+version was ever installed, stop using the environment, investigate the host,
+rotate exposed credentials and rebuild from vetted artifacts. An in-place
+package upgrade does not remediate a compromised host.
+
+For a fresh environment, install the bridge outside the repo:
 
 ```bash
 OPENBENCH_HOME=${OPENBENCH_HOME:-$HOME/.openbench}
 uv venv --python 3.12 "$OPENBENCH_HOME/bridge-venv"
-uv pip install --python "$OPENBENCH_HOME/bridge-venv/bin/python" 'litellm[proxy]'
+uv pip install --exclude-newer '7 days' --exclude-newer-package 'certifi=2026-10-21T00:00:00Z' \
+  --python "$OPENBENCH_HOME/bridge-venv/bin/python" 'litellm[proxy]!=1.107.0'
 ```
+
+`--exclude-newer '7 days'` skips releases from the last week; the explicit
+constraint also excludes the known compromised release after that window.
+Release age alone does not verify package contents or publisher integrity.
+It needs uv 0.9.17 or later; older uv rejects the relative duration. The
+dated certifi exception admits certifi 2026.10.19, which distrusts the
+compromised eMudhra/emSign root (GHSA-6q48-6c7w-9gw2) but is inside the window;
+drop it after 2026-10-28.
+
+The launch script checks installed package metadata and known startup-hook
+indicators from the shell before loading provider keys or starting the venv.
+Missing or ambiguous metadata is rejected. Passing this targeted guard does not
+establish that a previously exposed host is clean.
 
 Then start it in the foreground before Codex open-model runs:
 
