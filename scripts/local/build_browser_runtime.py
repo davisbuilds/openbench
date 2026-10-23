@@ -22,8 +22,8 @@ def main():
     if not re.fullmatch(r'sha256:[a-f0-9]{64}',args.base_image): parser.error('base must be a local immutable image ID')
     if args.receipt.exists(): parser.error('receipt already exists; preserve prior evidence')
     inspected=json.loads(subprocess.check_output(['docker','image','inspect',args.base_image]))[0]
-    if inspected['Id']!=args.base_image or inspected['Config'].get('Labels',{}).get('org.openbench.developer-environment')!='3':
-        parser.error('base must be developer runtime v3')
+    if inspected['Id']!=args.base_image or inspected['Config'].get('Labels',{}).get('org.openbench.developer-environment') not in {'3', '4'}:
+        parser.error('base must be developer runtime v3 or v4')
     tag='openbench-local/browser-build-base:'+uuid.uuid4().hex
     subprocess.run(['docker','tag',args.base_image,tag],check=True)
     try:
