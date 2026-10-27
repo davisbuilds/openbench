@@ -16,11 +16,12 @@ import tempfile
 from . import frozen_context, repair_worker
 from .harbor_sandbox import pack_files, read_tree, validate_image
 from .repair_evidence import Operation, write_json
-from .repair_oracles import activity_explorer_v2
+from .repair_oracles import activity_explorer_v2, activity_explorer_v3
 from .sandbox_grading import CandidateFailure
 
 # Code paths are owned by OpenBench, never by the package descriptor.
-BACKENDS = {'activity-explorer-v2': activity_explorer_v2}
+BACKENDS = {'activity-explorer-v2': activity_explorer_v2,
+            'activity-explorer-v3': activity_explorer_v3}
 REQUIRED = {'evaluation.json', 'cases.json', 'evaluator.py', 'solver/instruction.md'}
 SCOPE = 'diagnostic private-package replay; not campaign admission or a benchmark result'
 

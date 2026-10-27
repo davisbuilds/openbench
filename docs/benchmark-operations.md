@@ -75,6 +75,35 @@ The session exits when this script finishes; its receipts survive. A missing
 ledger and intended result coverage before declaring completion. Retain failure
 receipts. Do not launch a second copy simply because a session disappeared.
 
+## Closeout and dashboard delivery
+
+Campaign execution and dashboard delivery are separate completion states. Before
+calling a scored campaign closed:
+
+1. Inspect `obench campaign status` on its execution host and verify its sealed
+   suite with `obench run --verify-run-manifest RUN_MANIFEST`. Confirm intended trial coverage and
+   retain execution failures as recorded outcomes. Qualification, transport and
+   smoke controls are not scored studies.
+2. If this installation uses AgentMonitor, follow its installed import contract.
+   The session watcher does **not** ingest benchmark result files. Transfer the
+   sealed manifest's results JSONL unchanged to a private directory on the
+   dashboard host; verify its SHA-256 against the verified source manifest.
+3. Run `amon import benchmark RESULTS_JSONL --dry-run --json`, then
+   `amon import benchmark RESULTS_JSONL --json`. Preserve embedded suite identity;
+   do not override `--study` for canonical Harbor rows. Imports are idempotent.
+4. Verify each study ID and expected cell count using `amon benchmarks list
+   --json` and the running dashboard's Benchmarks page or API. Save the source
+   manifest/hash, import receipt and readback alongside private campaign evidence.
+   Report delivery as pending or failed if any step fails; do not erase or rerun
+   successful trials to repair delivery.
+5. Record pending adjudication and blind usability review separately. Diagnostic
+   replays under corrected oracles do not replace original imported scores.
+   Stop only the dedicated campaign VM after checking no other work uses it.
+
+This is an explicit operator closeout step, not an automatic remote import hook.
+No credentials, private study names or captured result files belong in public
+repository artifacts.
+
 ## Sleep, restart and interruption
 
 - Closing a terminal or losing SSH should leave the tmux-hosted runner alive.

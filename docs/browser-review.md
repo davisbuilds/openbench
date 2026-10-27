@@ -22,7 +22,7 @@ a private bundle. It checks source hashes against the supplied grading receipts;
 **this is not independent verification of the entire suite**. Verify the sealed
 suite separately before making benchmark claims. The current task adapter is
 `activity-explorer-v1` or `activity-explorer-v2`, including `private-evaluation` receipts
-that declare the pinned `activity-explorer-v2` backend and `browser-observations-v1`
+that declare the pinned `activity-explorer-v2` or `activity-explorer-v3` backend and `browser-observations-v1`
 protocol. Private evaluator code, fixtures and package metadata are never loaded
 or copied into the review bundle. This selects a compatible viewer; it does not
 authenticate a receipt or authorize evaluation. Other app protocols are not implicitly supported.
