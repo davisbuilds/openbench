@@ -57,6 +57,15 @@ class CapacityTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'parallel capacity unavailable'):
                 resources.require_capacity(compiled)
 
+    def test_six_gib_vm_still_refuses_parallel_admission(self):
+        from types import SimpleNamespace
+        compiled = SimpleNamespace(suite=SimpleNamespace(run=SimpleNamespace(concurrency=2), project_root='.'))
+        values = {**self.healthy(), 'docker_total_bytes': 6 * resources.GIB, 'docker_used_bytes': 0}
+        self.assertEqual(resources.decide(values)['concurrency'], 1)
+        with patch.object(resources, 'sample', return_value=values):
+            with self.assertRaisesRegex(ValueError, 'docker_memory_headroom'):
+                resources.require_capacity(compiled)
+
     def test_overlap_detector_rejects_serial_and_unbound_evidence(self):
         from obench.runtime_admission import verify_parallel_execution, AdmissionError
         with tempfile.TemporaryDirectory() as tmp:

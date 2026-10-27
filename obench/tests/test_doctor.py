@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Unit tests for doctor.py evaluation, exit-code, and rendering logic.
 
-All probes are mocked; no live CLI/auth/network calls are made.
+CLI/auth/network probes are mocked; no live service calls are made.
 """
 
 import contextlib
 import io
 import json
 import os
+from pathlib import Path
 import sys
 import types
 import unittest
@@ -494,6 +495,17 @@ class TestDockerEnv(unittest.TestCase):
         ok, detail = doctor.check_docker_resources(p, {"cpus": 4, "memory_gib": 12})
         self.assertFalse(ok)
         self.assertIn("Memory", detail)
+
+    def test_serial_preset_checks_guest_memory_without_changing_default(self):
+        path = Path(__file__).resolve().parents[2] / ".openbench/env-requirements-serial.toml"
+        requirements = doctor.load_env_requirements(doctor.Probes(), str(path))
+        self.assertEqual(requirements, {"cpus": 4, "memory_gib": 5})
+        p = self._docker_env_probes()
+        p.run_map[("docker", "info", "--format", "{{.MemTotal}}")] = (0, str(11 * 1024**3 // 2))
+        self.assertTrue(doctor.check_docker_resources(p, requirements)[0])
+        self.assertFalse(doctor.check_docker_resources(p, doctor.load_env_requirements(p, "/nonexistent"))[0])
+        p.run_map[("docker", "info", "--format", "{{.MemTotal}}")] = (0, str(5 * 1024**3 - 1))
+        self.assertFalse(doctor.check_docker_resources(p, requirements)[0])
 
     def test_check_docker_resources_below_cpus(self):
         p = self._docker_env_probes()
