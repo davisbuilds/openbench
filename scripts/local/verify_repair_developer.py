@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
-TASKS = ('dojo-evidence-pr60-c3-o5', 'am-benchmark-pr106-c2-o3')
+TASKS = ('dojo-evidence-pr60-c3-o5', 'am-benchmark-pr106-c3-o3')
 
 
 def main():

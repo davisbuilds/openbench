@@ -126,6 +126,11 @@ the exact treatment identity; the label is a human-readable feature revision.
   Admission now runs the real pinned Codex tool loop through edit, search, diff,
   Python tests, TypeScript checking/execution, native compilation and cleanup.
   Separate checkout controls run the commands documented by both current cases.
+  The AgentMonitor control uses `am-benchmark-pr106-c3-o3`: its sole source
+  adaptation from case 2 is `engines.pnpm = "10.34.7"`, with original bytes,
+  hashes and diff retained in the package. Historical cases stay unchanged.
+  This fixture/host-control change requires fresh admission but no generic
+  image rebuild; these inputs are outside the assembled image build context.
   The harness may still reject force-removal commands; ordinary `rm -r` cleanup
   is exercised successfully rather than changing Codex's policy.
 

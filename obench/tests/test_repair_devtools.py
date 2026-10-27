@@ -98,6 +98,54 @@ class WorkspaceGitTests(unittest.TestCase):
 
 
 class DeveloperCaseTests(unittest.TestCase):
+    def test_patched_runtime_control_preserves_historical_case_except_pnpm_engine(self):
+        import difflib
+        import hashlib
+        import tomllib
+        from obench.repair_oracles.registry import task_digest
+        from obench import runtime_admission
+        root = Path(__file__).resolve().parents[2]
+        tasks = root / 'benchmarks/harbor/local'
+        previous = tasks / 'am-benchmark-pr106-c2-o3'
+        current = tasks / 'am-benchmark-pr106-c3-o3'
+        def files(task):
+            app = task / 'environment/app'
+            return {p.relative_to(app).as_posix(): p.read_bytes()
+                    for p in app.rglob('*') if p.is_file()}
+        old, new = files(previous), files(current)
+        before = old.pop('package.json')
+        after = new.pop('package.json')
+        self.assertEqual(old, new)
+        self.assertEqual(after, before.replace(b'"pnpm": "10.29.3"', b'"pnpm": "10.34.7"', 1))
+        self.assertEqual(json.loads(before)['engines']['pnpm'], '10.29.3')
+        self.assertEqual(json.loads(after)['engines']['pnpm'], '10.34.7')
+        evidence = current / 'execution-revision'
+        self.assertEqual((evidence / 'package.original.json').read_bytes(), before)
+        patch = ''.join(difflib.unified_diff(before.decode().splitlines(True), after.decode().splitlines(True),
+            fromfile='a/environment/app/package.json', tofile='b/environment/app/package.json')).encode()
+        self.assertEqual((evidence / 'package.patch').read_bytes(), patch)
+        manifest = json.loads((evidence / 'manifest.json').read_text())
+        for key, content in [('original_sha256', before), ('revised_sha256', after),
+                             ('patch_sha256', patch), ('source_task_toml_sha256', (previous / 'task.toml').read_bytes())]:
+            self.assertEqual(manifest[key], hashlib.sha256(content).hexdigest())
+        source = json.loads((current / 'SOURCE_MANIFEST.json').read_text())
+        entry = next(item for item in source['environment/app'] if item['path'] == 'package.json')
+        self.assertEqual(entry['sha256'], hashlib.sha256(after).hexdigest())
+        old_metadata = tomllib.loads((previous / 'task.toml').read_text())['metadata']
+        metadata = tomllib.loads((current / 'task.toml').read_text())['metadata']
+        self.assertEqual(metadata['openbench_revision'], {**old_metadata['openbench_revision'], 'case_revision': 3})
+        self.assertEqual(task_digest(current), metadata['openbench_task_content_digest']['sha256'])
+        # The selected developer control and every retained revision remain bound
+        # into admission; changing the fixture cannot reuse an old receipt.
+        import runpy
+        selected = runpy.run_path(str(root / 'scripts/local/verify_repair_developer.py'))['TASKS']
+        self.assertIn(current.name, selected)
+        self.assertNotIn(previous.name, selected)
+        identity = runtime_admission.implementation()
+        for task in (previous, current):
+            relative = (task / 'environment/app/package.json').relative_to(root).as_posix()
+            self.assertEqual(identity[relative], hashlib.sha256((root / relative).read_bytes()).hexdigest())
+
     def test_packaged_cases_preserve_buggy_source_and_oracles(self):
         import tomllib
         from obench.sandbox_grading import task_digest

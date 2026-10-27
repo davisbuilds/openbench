@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "revision": "pnpm-10.34.7-v1",
+  "source_task": "am-benchmark-pr106-c2-o3",
+  "source_task_toml_sha256": "2c1baeafbf12b0a829320d5c76c783405e830b9e8c61cf70d0d712a1e3600dbb",
+  "field": "engines.pnpm",
+  "before": "10.29.3",
+  "after": "10.34.7",
+  "original_sha256": "e2072c6d60cc42b85de96e322260987fda67014173a128b2368339d578cc80ac",
+  "revised_sha256": "5bcb6a5eeb9604ebc2c99b51790c35450ab735eb42886a3d653dd9922ffea7bd",
+  "patch_sha256": "cdca8aa0a28f4dc6a78f7d43506ca1e5da57569eeace0683d48bc13edbcf373b"
+}
