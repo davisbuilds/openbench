@@ -48,6 +48,20 @@ the PR, not as a "resolved" note here).
   VM checks; current pinned-image and campaign qualification evidence remains
   required before dispatch. Never treat skipped doctor checks as passed.
 
+### Scope CodeQL away from frozen benchmark fixtures
+
+- **What**: CodeQL default setup scans the historical application copies under
+  `benchmarks/harbor/local/*/environment/app/`. Every new fixture revision copies
+  the same source, and the PR check then reports the copied code's alerts as new.
+- **Evidence**: #48 failed the CodeQL check with 8 alerts (5 critical, 3 high),
+  all in the c3-o3 AgentMonitor copy; they were dismissed as "used in tests".
+  Main still has the same 8 alerts open in each of the v3, v4 and c2-o3 copies (24).
+  Default setup cannot exclude paths.
+- **Next**: switch to an advanced-setup CodeQL workflow with a config that
+  `paths-ignore`s fixture application trees (keeping `obench/`, `scripts/` and
+  `docker/` scanned), then dismiss or let the 24 existing fixture alerts close.
+  Editing the fixtures is not an option: they are the benchmarked source and are
+  bound by task digests and provenance.
 
 ### Calibrate UI score interpretation and replay historical submissions
 
