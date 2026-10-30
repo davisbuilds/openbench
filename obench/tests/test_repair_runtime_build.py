@@ -40,6 +40,13 @@ else:
                 umask=0o077, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             modes = json.loads((temp / 'modes.json').read_text())
+            self.assertEqual(set(modes), {
+                'Dockerfile', 'node', 'node/package.json', 'node/package-lock.json',
+                'tools', 'tools/package.json', 'tools/package-lock.json', 'obench',
+                'obench/__init__.py', 'obench/sandbox_gateway.py', 'obench/repair_devtools.py',
+                'obench/runtime_trust.py', 'trust', 'trust/blocked-root.pem',
+                'python', 'python/requirements.txt'})
+            self.assertEqual(modes['tools/package-lock.json'], 0o644)
             self.assertEqual(modes['obench'], 0o755)
             self.assertEqual(modes['obench/__init__.py'], 0o644)
             self.assertEqual(modes['obench/sandbox_gateway.py'], 0o644)

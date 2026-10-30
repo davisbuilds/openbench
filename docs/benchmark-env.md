@@ -28,7 +28,7 @@ were:
 
 ### Pinned Colima Configuration
 
-Always start Colima with the pinned resource reservation:
+The default Colima resource reservation is:
 
 ```bash
 colima start --cpu 4 --memory 12 --disk 100
@@ -56,8 +56,9 @@ bash scripts/local/colima-benchmark.sh --autostart         # + brew autostart
 ```
 
 This script:
-- Leaves a running VM alone when it already meets the pinned floor, and
-  otherwise stops it and starts it with pinned `--cpu 4 --memory 12 --disk 100`
+- Leaves a running VM alone when it already meets the selected floor, and
+  otherwise stops it and starts it with the selected CPU/memory and 100 GiB disk
+  (default `--cpu 4 --memory 12 --disk 100`)
 - With `--autostart`, enables the `brew services` colima service so the VM
   survives reboot (default profile only). It is opt-in because the VM then
   reserves its memory from every login.
@@ -113,6 +114,30 @@ Colima removes the stopped profile's Docker context. If it inherits
 clears these two variables for its own Colima lifecycle calls; Docker build/run
 commands still explicitly target the selected profile.
 
+### Smaller VM for Serial Trials
+
+For a deliberately serial suite, opt into the 6 GiB reservation without changing
+the default requirements or another profile:
+
+```bash
+bash scripts/local/colima-benchmark.sh --profile openbench \
+  --env-requirements .openbench/env-requirements-serial.toml --provision-only
+export DOCKER_CONTEXT=colima-openbench
+obench doctor --docker-env --env-requirements .openbench/env-requirements-serial.toml
+```
+
+The serial preset selects four CPUs, 6 GiB VM memory and a 5 GiB guest-visible
+Docker memory floor. The difference allows for guest kernel overhead. These are
+explicit resource policies, not measured workload requirements or proof that a
+particular task fits. Existing larger VMs remain running; add `--restart` to
+resize the selected profile to the reservation. The disk reservation stays 100 GiB.
+
+Keep `[run].concurrency = 1` in the suite and qualify its exact runtime and tasks
+before launch. Provisioning and doctor do not grant campaign admission. Serial
+campaigns do not use the parallel capacity gate; two-trial preparation and
+admission still require 10 GiB Docker memory headroom and all other
+[capacity checks](benchmark-operations.md#capacity-aware-preparation).
+
 ### Restart Procedure
 
 If the benchmark environment behaves unexpectedly:
@@ -155,16 +180,24 @@ This catches corrupt or empty images that pass `inspect` but fail at runtime
 
 ### Configuring Resource Requirements
 
-Edit `.openbench/env-requirements.toml` to change the floor:
+Select a requirements file with `--env-requirements PATH` in both the helper and
+`obench doctor --docker-env`; omitted flags retain `.openbench/env-requirements.toml`.
+Helper paths resolve from the caller's working directory; its default file comes
+from this checkout. For example:
 
 ```toml
 cpus = 4
 memory_gib = 12
+# Optional helper-only VM reservation; defaults to memory_gib.
+# colima_memory_gib = 13
 ```
 
-The doctor gate reads these values and compares them against `docker info`
-output. A FAIL on CPUS or MEMORY means the VM is under-provisioned — run
-`colima start` with higher `--cpu` / `--memory`.
+The doctor compares `cpus` and `memory_gib` against `docker info` output. The
+helper uses `cpus` and `colima_memory_gib` (or `memory_gib` when omitted) for VM
+provisioning, then passes the same file to doctor. Selected helper files must
+exist, parse as TOML and specify positive integer resources; VM memory must be
+at least the Docker floor. Invalid selections fail before stopping or starting
+the VM. A FAIL on CPUS or MEMORY means the daemon is below the selected floor.
 
 ## Auth Single-Writer Rule
 

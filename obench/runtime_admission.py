@@ -65,7 +65,8 @@ def implementation():
                          'benchmarks/harbor/local/am-benchmark-pr106-v4',
                          'benchmarks/local/am-benchmark-pr106-v2',
                          'benchmarks/harbor/local/dojo-evidence-pr60-c3-o5',
-                         'benchmarks/harbor/local/am-benchmark-pr106-c2-o3'):
+                         'benchmarks/harbor/local/am-benchmark-pr106-c2-o3',
+                         'benchmarks/harbor/local/am-benchmark-pr106-c3-o3'):
         files += [p for p in (ROOT/control_root).rglob('*') if p.is_file() and '__pycache__' not in p.parts]
     return {str(p.relative_to(ROOT)):digest(p) for p in sorted(files)}
 
