@@ -90,7 +90,7 @@ def reviewable_browser_receipt(receipt):
     pin = package.get('sha256')
     return (isinstance(descriptor, dict)
             and type(descriptor.get('schema')) is int and descriptor['schema'] == 1
-            and descriptor.get('backend') == 'activity-explorer-v2'
+            and descriptor.get('backend') in ('activity-explorer-v2', 'activity-explorer-v3')
             and isinstance(pin, str) and len(pin) == 64
             and all(c in '0123456789abcdef' for c in pin))
 
@@ -106,7 +106,7 @@ def prepare(trials, output, *, keep_order=False):
         receipt_bytes = (trial / 'verifier/sandbox-grading.json').read_bytes()
         receipt = json.loads(receipt_bytes)['grading']
         if not reviewable_browser_receipt(receipt):
-            raise ValueError('review supports activity-explorer-v1/v2 artifacts and pinned private activity-explorer-v2 artifacts')
+            raise ValueError('review supports activity-explorer-v1/v2 artifacts and pinned private activity-explorer-v2/v3 artifacts')
         expected = receipt.get('source_sha256')
         if not isinstance(expected, dict) or not expected or any(not k.startswith('web/') for k in expected):
             raise ValueError('missing browser source hashes')

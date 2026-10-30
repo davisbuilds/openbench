@@ -237,7 +237,7 @@ const results=[];
 
 OBSERVER = DRIVER[DRIVER.index('class Observer'):DRIVER.index('async function visibleTitles')]
 
-def program():
+def program(driver=DRIVER):
     return r'''
 import base64,io,json,os,subprocess,sys,tarfile
 from pathlib import Path
@@ -248,7 +248,7 @@ with tarfile.open(fileobj=io.BytesIO(base64.b64decode(p['source']))) as tar:
   if not member.isfile() or member.name.startswith('/') or '..' in Path(member.name).parts:
    raise ValueError('unsafe browser source archive')
   dest=root/member.name;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(tar.extractfile(member).read())
-driver=Path('/tmp/driver.cjs');driver.write_text(''' + repr(DRIVER) + r''')
+driver=Path('/tmp/driver.cjs');driver.write_text(''' + repr(driver) + r''')
 result=subprocess.run(['node',str(driver)],input=json.dumps({'cases':p['cases']}).encode(),stdout=sys.stdout.buffer,stderr=sys.stderr.buffer)
 sys.exit(result.returncode)
 '''

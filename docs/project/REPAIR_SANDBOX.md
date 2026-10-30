@@ -34,8 +34,10 @@ Codex remains pinned to 0.162.0.
 Python developer tools use a wheel-only hash lock, including pytest 9.0.3's
 local-temporary-directory security fix. The CLI tools have their own frozen npm lock, separate from the developer
 package lock. Install scripts are disabled; SQLite is built explicitly.
-The developer package lock updates DOMPurify to 3.4.17 and Vite to the aged
-8.2.4 security fix, preserving the existing Vite minor branch.
+The developer package lock follows main's reviewed dependency updates:
+DOMPurify 3.4.17, Vite 8.3.5 and undici 8.12.3. Vite 8.3 supersedes the
+earlier 8.2.4 security pin, so images qualified on the 8.2.4 lock are not
+evidence for this lock.
 
 These input changes invalidate prior image admissions. Build new immutable images,
 verify effective versions and trust stores, then renew offline boundary, actual

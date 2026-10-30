@@ -1185,6 +1185,8 @@ def _validate_suite_sandbox_policy(manifest):
                       if 'obench.repair_oracles.activity_explorer' in modules)
     accepted += tuple(modules | {'obench.repair_oracles.artifact_review_v1'} for modules in accepted
                       if browser_v2 <= modules)
+    browser_v3 = {'obench.browser_worker_v3', 'obench.repair_oracles.activity_explorer_v3'}
+    accepted += tuple(modules | browser_v3 for modules in accepted if browser_v2 <= modules)
     private_modules = {'obench.package_campaign', 'obench.evaluation_package', 'obench.repair_evidence'}
     if 'evaluation_package' in policy:
         identity = policy['evaluation_package']
@@ -1196,9 +1198,10 @@ def _validate_suite_sandbox_policy(manifest):
                 {'schema','id','case_revision','oracle_revision','split','backend'}
                 or type(descriptor.get('schema')) is not int or descriptor['schema'] != 1
                 or descriptor.get('split') not in ('development','holdout')
-                or descriptor.get('backend') not in ('activity-explorer-v2', 'artifact-review-v1')):
+                or descriptor.get('backend') not in ('activity-explorer-v2', 'activity-explorer-v3', 'artifact-review-v1')):
             raise ValueError('suite private descriptor is invalid')
-        accepted = tuple(modules | private_modules for modules in accepted if browser_v2 <= modules)
+        required_browser = browser_v3 if descriptor['backend'] == 'activity-explorer-v3' else browser_v2
+        accepted = tuple(modules | private_modules for modules in accepted if required_browser <= modules)
         if descriptor['backend'] == 'artifact-review-v1':
             accepted = tuple(modules for modules in accepted if 'obench.repair_oracles.artifact_review_v1' in modules)
     for task_set in manifest.get('task_sets', []):

@@ -1157,19 +1157,21 @@ def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: fl
                                               allow_nan=False).encode()).hexdigest()
     scheme = 5 if expected_package is not None else 4 if expected_oracle is not None else 3
     if scheme == 5:
-        from .repair_oracles.registry import ORACLES
         identity = binding.get('evaluation_package')
         descriptor = identity.get('evaluation') if isinstance(identity, dict) else None
         key = descriptor.get('backend') if isinstance(descriptor, dict) else None
-        backend = ORACLES.get(key) if isinstance(key, str) else None
+        # Package backends are a closed set; v3 keeps the v2 browser protocol
+        # without becoming a scheme-4 task oracle.
+        protocol = {'activity-explorer-v2': 'browser-observations-v1',
+                    'activity-explorer-v3': 'browser-observations-v1',
+                    'artifact-review-v1': 'artifact-observations-v1'}.get(key) if isinstance(key, str) else None
         if (binding.get('scheme') != 5 or not isinstance(identity, dict)
                 or identity.get('sha256') != expected_package
                 or graded.get('evaluation_package') != identity
                 or graded.get('oracle_id') != 'private-evaluation'
-                or backend is None or backend.id not in ('activity-explorer-v2', 'artifact-review-v1')
-                or graded.get('protocol') != backend.protocol):
+                or protocol is None or graded.get('protocol') != protocol):
             raise _fail(location, 'private evaluation differs from locked operator pin')
-        expected_oracle = backend.id
+        expected_oracle = key
     if scheme == 4:
         from .repair_oracles.registry import ORACLES
         oracle = ORACLES.get(expected_oracle)
@@ -1220,7 +1222,7 @@ def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: fl
         source_hashes = {name: _object(value, location).get("sha256") for name, value in files.items()}
         if not source_hashes or graded.get("source_sha256") != source_hashes:
             raise _fail(location, "graded source differs from the frozen submission")
-    if expected_oracle in ('activity-explorer-v1', 'activity-explorer-v2') and worker is not None:
+    if expected_oracle in ('activity-explorer-v1', 'activity-explorer-v2', 'activity-explorer-v3') and worker is not None:
         from .browser_policy import identity
         if worker.get('browser_policy_sha256') != identity():
             raise _fail(location, 'browser worker policy differs from the admitted policy')
@@ -1228,7 +1230,7 @@ def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: fl
         if (not isinstance(runtime, dict) or runtime.get('sandbox') is not True
                 or runtime.get('playwright') != '1.64.0' or not runtime.get('chromium')):
             raise _fail(location, 'missing sandboxed browser runtime evidence')
-        if expected_oracle == 'activity-explorer-v2' and (
+        if expected_oracle in ('activity-explorer-v2', 'activity-explorer-v3') and (
                 runtime.get('observer') != 'cdp-isolated-world-v2' or runtime.get('isolated_world') is not True):
             raise _fail(location, 'missing isolated browser observer evidence')
     return path

@@ -37,7 +37,8 @@ MODULES = ('obench.sandbox_grading', 'obench.harbor_sandbox', 'obench.repair_wor
            'obench.repair_oracles.registry', 'obench.repair_oracles.agentmonitor',
            'obench.repair_oracles.agentmonitor_v3', 'obench.browser_worker',
            'obench.browser_policy', 'obench.repair_oracles.activity_explorer',
-           'obench.browser_worker_v2', 'obench.repair_oracles.activity_explorer_v2')
+           'obench.browser_worker_v2', 'obench.repair_oracles.activity_explorer_v2',
+           'obench.browser_worker_v3', 'obench.repair_oracles.activity_explorer_v3')
 MODULES = (*MODULES, 'obench.repair_oracles.artifact_review_v1')
 PACKAGE = Path(__file__).resolve().parents[1]
 

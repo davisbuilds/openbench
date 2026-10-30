@@ -76,6 +76,14 @@ class PackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'backend'):
             package.load(path, sha)
 
+    def test_v3_backend_requires_a_separately_pinned_descriptor(self):
+        files = fixture()
+        descriptor = json.loads(files['evaluation.json'])
+        descriptor.update(backend='activity-explorer-v3', oracle_revision=2)
+        files['evaluation.json'] = json.dumps(descriptor).encode()
+        path, sha = self.archive(files)
+        self.assertEqual(package.load(path, sha).descriptor['backend'], 'activity-explorer-v3')
+
     def test_pin_is_required_and_verified(self):
         path, sha = self.archive()
         package.load(path, sha)
