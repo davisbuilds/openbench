@@ -2,7 +2,7 @@
   "schema": 1,
   "revision": "pnpm-10.34.7-v1",
   "source_task": "am-benchmark-pr106-c2-o3",
-  "source_task_toml_sha256": "2c1baeafbf12b0a829320d5c76c783405e830b9e8c61cf70d0d712a1e3600dbb",
+  "source_task_toml_sha256": "f8809df855ec99e7f291d4fccb3119f2678cd9767b004e3b78f39cecae98c71d",
   "field": "engines.pnpm",
   "before": "10.29.3",
   "after": "10.34.7",
