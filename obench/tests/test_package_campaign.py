@@ -93,6 +93,35 @@ class CampaignPackageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             stats._validate_suite_sandbox_policy(tampered)
 
+    def test_browser_package_backends_select_browser_admission(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from obench import runtime_admission, suite_run
+        base = self.root
+        for backend, oracle_revision in (('activity-explorer-v2', 1), ('activity-explorer-v3', 2)):
+            with self.subTest(backend=backend):
+                self.root = base/backend
+                self.root.mkdir()
+                files = fixture()
+                descriptor = json.loads(files['evaluation.json'])
+                descriptor.update(backend=backend, oracle_revision=oracle_revision)
+                files['evaluation.json'] = json.dumps(descriptor).encode()
+                self.archive = self.root/'evaluation.tar'
+                self.sha = _write(files, {n: 0o644 for n in files}, self.archive, 'evaluation', {})
+                self.auth = package_campaign.pin(self.archive, self.sha, True)
+                self.task = self.root/f'synthetic-control-c1-o{oracle_revision}'
+                package_campaign.export_task(self.auth.load(), self.task)
+                compiled = self.compile()
+                with patch.object(runtime_admission, 'preflight_harbor_binary',
+                                  return_value=SimpleNamespace(version='test', git_commit='test')), \
+                     patch.object(suite_run, '_verify_sandbox_runtime'), \
+                     patch.object(runtime_admission.subprocess, 'check_output', side_effect=[json.dumps([{
+                         'Id': compiled.suite.sandbox.runtime_image, 'Os': 'linux', 'Architecture': 'arm64'}]), '{}']):
+                    fingerprint = runtime_admission.fingerprint(compiled, '/test/harbor')
+                self.assertEqual(fingerprint.get('execution_profile'), 'browser-v1')
+                _, task = runtime_admission.prepare_control(compiled, self.root/'control')
+                self.assertEqual(task.name, 'activity-explorer-c2-o2')
+
     def test_canonical_job_binds_pin_and_manifest_is_readable(self):
         from obench import suite_run, stats
         compiled = self.compile()

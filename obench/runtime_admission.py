@@ -83,7 +83,7 @@ def fingerprint(compiled, harbor_binary):
     browser = any(item.get('repair_revision',{}).get('oracle') == 'activity-explorer'
                   for item in compiled.manifest['task_sets'])
     if compiled.suite.sandbox.evaluation:
-        browser = compiled.suite.sandbox.evaluation.load().descriptor['backend'] == 'activity-explorer-v2'
+        browser = compiled.suite.sandbox.evaluation.load().descriptor['backend'] in ('activity-explorer-v2', 'activity-explorer-v3')
     return {'schema':1, 'implementation_scope':'execution-import-closure-v1', 'host':socket.gethostname(),
             **({'execution_profile':'browser-v1'} if browser else {}),
             'image':{'id':image['Id'],'requested':compiled.suite.sandbox.runtime_image,'os':image['Os'],'architecture':image['Architecture']},
@@ -249,7 +249,7 @@ def prepare_control(compiled, directory):
     tasks = directory/'.openbench/tasks'
     shutil.rmtree(tasks)
     source = ((ROOT/'benchmarks/harbor/local/activity-explorer-c2-o2'
-               if compiled.suite.sandbox.evaluation.load().descriptor['backend'] == 'activity-explorer-v2'
+               if compiled.suite.sandbox.evaluation.load().descriptor['backend'] in ('activity-explorer-v2', 'activity-explorer-v3')
                else ROOT/'benchmarks/harbor/local/dojo-evidence-pr60-v5') if compiled.suite.sandbox.evaluation
               else selected.task_set.path/selected.task_names[0])
     task = tasks/source.name
