@@ -24,7 +24,10 @@ Launch every multi-trial campaign inside a named `tmux` session on the execution
 host, with persistent logs and a completion/exit-code receipt. Do not substitute
 `nohup` or a detached Python process. Verify the live session and runner after
 launch, and report the session name, host, result path and next status check.
-Follow [the campaign launch checklist](docs/benchmark-operations.md). For
+Follow [the campaign launch and closeout checklist](docs/benchmark-operations.md).
+When AgentMonitor is configured, reconcile scored results into its running dashboard
+and verify study/cell counts before calling delivery complete; session watching
+does not import benchmark files. For
 checkout-based isolated repair campaigns, use `obench campaign qualify` then
 `obench campaign launch --admission ... --quality ...`; the wrapper supervises canonical
 `obench run` and rejects missing or stale runtime admission. Repair campaigns also require one current task-quality receipt per task; see

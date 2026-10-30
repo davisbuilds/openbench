@@ -68,6 +68,13 @@ class ReviewContracts(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'differs'):
                 prepare([source], root/'tampered')
 
+    def test_private_v3_uses_existing_browser_review_protocol(self):
+        from obench.browser_review import reviewable_browser_receipt
+        self.assertTrue(reviewable_browser_receipt({
+            'oracle_id': 'private-evaluation', 'protocol': 'browser-observations-v1',
+            'evaluation_package': {'sha256': 'a'*64,
+                                   'evaluation': {'schema': 1, 'backend': 'activity-explorer-v3'}}}))
+
     def test_private_artifact_requires_supported_browser_protocol(self):
         valid = {'protocol': 'browser-observations-v1', 'evaluation_package': {
             'sha256': 'a'*64, 'evaluation': {'schema': 1, 'backend': 'activity-explorer-v2'}}}

@@ -112,9 +112,12 @@ class StagedAuthTests(unittest.TestCase):
             with self.assertRaises(RuntimeError): staged_auth_paths(str(source), str(returned))
 
 class PrivateReceiptTests(SandboxReceiptTests):
-    def test_private_pin_mismatch_and_browser_policy_are_rejected(self):
+    def test_private_v3_still_requires_isolated_observer_evidence(self):
+        self.test_private_pin_mismatch_and_browser_policy_are_rejected('activity-explorer-v3')
+
+    def test_private_pin_mismatch_and_browser_policy_are_rejected(self, backend='activity-explorer-v2'):
         from obench.browser_policy import identity
-        package = {'sha256':'a'*64,'evaluation':{'backend':'activity-explorer-v2'}}
+        package = {'sha256':'a'*64,'evaluation':{'backend':backend}}
         self.binding.update(scheme=5,evaluation_package=package)
         self.digest={'scheme':5,'sha256':hashlib.sha256(json.dumps(self.binding,sort_keys=True,separators=(',',':')).encode()).hexdigest()}
         self.receipt['grading'].update(evaluation_package=package,oracle_id='private-evaluation',protocol='browser-observations-v1')

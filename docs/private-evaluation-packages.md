@@ -39,8 +39,9 @@ are rejected. Existing archives and exports are never overwritten.
 
 `cases.json` is a nonempty list of up to 128
 `{"id":"list","bucket":"content","request":{...}}` records. IDs are unique.
-Requests use the selected public worker's protocol. The browser backend
-is `activity-explorer-v2`: its isolated-world browser observer remains public;
+Requests use the selected public worker's protocol. The browser backends
+are `activity-explorer-v2` (historical) and `activity-explorer-v3` (cosmetic
+accessible-name casing): their isolated-world browser observer remains public;
 case inputs and acceptance rules may be private. Ordinary project tests and
 configuration belong in the solver checkout when needed for realistic work.
 
@@ -256,3 +257,13 @@ Then use ordinary `obench campaign launch --admission ... --quality ...`.
 No diagnostic command bypasses those gates. Keep archives, detailed check reports,
 transcripts and suite results private. The reusable public CI control is
 `scripts/local/verify_package_campaign.py` and contains only synthetic material.
+
+### Accessible-name correction (v3)
+
+The v3 backend accepts capitalization differences in Chromium accessible names,
+including CSS `text-transform` on an `aria-labelledby` target. It retains the
+CDP/isolated-world boundary and rejects missing or ambiguous controls. V2 remains
+available with its original case-sensitive control-name behavior. Packages moving
+to v3 must advance their oracle revision and freeze a new archive; solver inputs
+and case revision may stay unchanged. Existing artifacts may be diagnostically
+replayed, but never overwrite their original scores or pool oracle revisions.
