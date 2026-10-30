@@ -251,3 +251,5 @@ calibration tasks cannot be treated as secret evaluations.
 
 Private package-backed tasks use the same workflow and quality requirements, with
 an explicit operator archive/hash/trust pin. See [private package campaigns](private-evaluation-packages.md#canonical-campaign-route).
+
+For task extraction and comparison design, also follow [task fidelity](review-task-fidelity.md). The runtime includes Go 1.26.10 with offline defaults; project module caches must be provisioned and tested separately.

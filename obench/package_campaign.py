@@ -186,7 +186,8 @@ def grade_submission(root, authorization, image, *, timeout=90):
     if worker is not None:
         worker = {**worker, 'runtime_dependencies': result['runtime_dependencies']}
     return {**result, 'worker': worker, 'oracle_id': 'private-evaluation',
-            'protocol': 'browser-observations-v1',
+            'protocol': ('artifact-observations-v1' if authorization.load().descriptor['backend'] == 'artifact-review-v1'
+                         else 'browser-observations-v1'),
             'evaluation_package': metadata(authorization.load())}
 
 
@@ -215,7 +216,8 @@ class _PackageVerifier:
             else:
                 graded = {'score': 0, 'candidate_failure': 'invalid_source_artifact',
                           'source_sha256': None, 'worker': None, 'oracle_id': 'private-evaluation',
-                          'protocol': 'browser-observations-v1',
+                          'protocol': ('artifact-observations-v1' if self.authorization.load().descriptor['backend'] == 'artifact-review-v1'
+                                       else 'browser-observations-v1'),
                           'evaluation_package': metadata(self.authorization.load())}
         validate_task_binding(root, expected, self.authorization)
         score = graded['score']

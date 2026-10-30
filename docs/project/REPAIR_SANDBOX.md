@@ -19,6 +19,34 @@ credential-free tool-loop probe on 0.157.0. Prior authenticated receipts remain
 historical evidence; the updated runtime needs fresh qualification for every
 selected campaign model/effort before scored execution.
 
+## Security runtime inputs
+
+New builds use Node 24.22.1, CPython 3.12.15 from PBS20261021, Go 1.26.10,
+and pnpm 10.34.7. Linux AMD64 and ARM64 Python archives have separate SHA-256
+pins. PBS includes pip 26.2.2 with its updated vendored certifi bundle; system
+CA certificates are installed separately. A known-positive exact incident-root
+control must pass before the image excludes that root from system trust sources,
+regenerates the system store, and checks the effective system directory/bundle,
+pip's vendored certifi and Node's default roots. Signed APT metadata, selected
+repositories and exact dpkg versions are retained under `/opt/openbench/`.
+This check covers the exact incident certificate, not every cross-signed chain.
+Codex remains pinned to 0.162.0.
+Python developer tools use a wheel-only hash lock, including pytest 9.0.3's
+local-temporary-directory security fix. The CLI tools have their own frozen npm lock, separate from the developer
+package lock. Install scripts are disabled; SQLite is built explicitly.
+The developer package lock follows main's reviewed dependency updates:
+DOMPurify 3.4.17, Vite 8.3.5 and undici 8.12.3. Vite 8.3 supersedes the
+earlier 8.2.4 security pin, so images qualified on the 8.2.4 lock are not
+evidence for this lock.
+
+These input changes invalidate prior image admissions. Build new immutable images,
+verify effective versions and trust stores, then renew offline boundary, actual
+shell/project workflows, authenticated model and task-quality controls before
+scored execution. A recipe or static test result is not runtime qualification.
+Dependency images for historical projects must use matching headers and binaries
+from the selected immutable base, retain project locks, and record any build-only
+engine adaptation separately from unchanged solver source.
+
 ## Execution boundary
 
 ```text
@@ -61,13 +89,14 @@ archives, preserving project guidance and executable file modes.
 
 ### Developer environment (default for new repairs)
 
-`build_repair_runtime.py` builds developer environment revision 3, tagged
-`dev-v3-codex-0.162.0` for convenience. Suites must use its immutable image ID.
+`build_repair_runtime.py` builds developer environment revision 4, tagged
+`dev-v4-codex-0.162.0` for convenience. Suites must use its immutable image ID.
 The build receipt records the context hashes, effective tool versions and passing
 nonroot, read-only-root, offline developer workflow checks. An image digest is
 the exact treatment identity; the label is a human-readable feature revision.
 
 - Shared tools: Git, ripgrep, Bash, jq, Python/pytest, Node, npm/npx, pnpm,
+  Go 1.26.10 (revision 4),
   make, GCC/G++, curl and process inspection.
 - Backend profile: locked npm dependencies including TypeScript 6.0.3,
   tsx 4.23.5, SQLite and relevant type declarations. Revision 2 adds ESLint
@@ -81,10 +110,16 @@ the exact treatment identity; the label is a human-readable feature revision.
   through the immutable `/node_modules` ancestor; exports contain no dependency
   symlinks. Actual-harness workflow receipts bind the exact task/image, command
   and execution logs; see [repair validation](../repair-validation.md).
-- Every workspace gets one synthetic Git baseline, no remotes or original
+- Repair workspaces get one synthetic Git baseline, no remotes or original
   history. Git objects live in private scratch space rather than the exported
   source archive. A regular `.git` pointer supports status/diff and is excluded
   from grading. Supplied `.git` history is rejected before candidate execution.
+- Full reviews can supply `.openbench-review.json` and a binary `review.patch`
+  to reconstruct only the base and candidate commits. See
+  [task fidelity](../review-task-fidelity.md). Revision 4 checks this Git workflow
+  and offline Go compilation/tests. Project-specific Go module caches and
+  lockfile-matching Node dependencies still need provisioning and task-level
+  workflow checks; the generic image does not establish dependency fidelity.
 - Solver scratch `/tmp` is writable, executable, bounded to 512 MiB and remains
   private with `nosuid,nodev`; this permits compiling and running scratch probes.
   The broker's scratch remains non-executable. Credentials, host files, hidden
@@ -93,6 +128,11 @@ the exact treatment identity; the label is a human-readable feature revision.
   Admission now runs the real pinned Codex tool loop through edit, search, diff,
   Python tests, TypeScript checking/execution, native compilation and cleanup.
   Separate checkout controls run the commands documented by both current cases.
+  The AgentMonitor control uses `am-benchmark-pr106-c3-o3`: its sole source
+  adaptation from case 2 is `engines.pnpm = "10.34.7"`, with original bytes,
+  hashes and diff retained in the package. Historical cases stay unchanged.
+  This fixture/host-control change requires fresh admission but no generic
+  image rebuild; these inputs are outside the assembled image build context.
   The harness may still reject force-removal commands; ordinary `rm -r` cleanup
   is exercised successfully rather than changing Codex's policy.
 

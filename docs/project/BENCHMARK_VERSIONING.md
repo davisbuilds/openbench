@@ -73,10 +73,13 @@ the full suite seals still distinguish those runs. Qualification's bounded
 file-edit controls intentionally have different prompt hashes and live under
 their separate control suite identity.
 
-Developer-ready packages currently use `am-benchmark-pr106-c2-o3` and
+Developer-ready packages currently use `am-benchmark-pr106-c3-o3` and
 `dojo-evidence-pr60-c3-o5`: additional public tests and development instructions
-advance each case revision; oracle behavior stays unchanged. The richer runtime
-is separately pinned as the execution treatment.
+advanced their earlier case revisions; oracle behavior stays unchanged.
+AgentMonitor case 3 changes only `engines.pnpm` from `10.29.3` to `10.34.7`
+for the patched-runtime workflow control, retaining the original manifest,
+hashes and diff under `execution-revision/`. Case 2 remains historical.
+The richer runtime is separately pinned as the execution treatment.
 
 ## Historical aliases
 

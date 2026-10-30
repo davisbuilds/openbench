@@ -9,11 +9,12 @@
 #   bash scripts/local/colima-benchmark.sh --status            # print VM resources
 #   bash scripts/local/colima-benchmark.sh --profile openbench # dedicated VM
 #   bash scripts/local/colima-benchmark.sh --provision-only  # VM checks; qualify later
+#   bash scripts/local/colima-benchmark.sh --profile openbench --env-requirements .openbench/env-requirements-serial.toml
 #   bash scripts/local/colima-benchmark.sh --autostart         # + brew autostart
 #
 # What this does (idempotently):
-#   1. Leave a running VM alone when it meets the pinned floor; otherwise stop
-#      it and start it with pinned CPU/memory/disk:
+#   1. Leave a running VM alone when it meets the selected floor; otherwise stop
+#      it and start it with selected CPU/memory and pinned disk (defaults):
 #        colima start --profile <profile> --cpu 4 --memory 12 --disk 100
 #   2. With --autostart, enable the brew colima service so the VM survives
 #      reboot (default profile only: the service starts no other profile)
@@ -33,9 +34,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Pinned resource reservation — must match .openbench/env-requirements.toml.
-COLIMA_CPUS=4
-COLIMA_MEMORY=12   # GiB
+# Resources come from the selected doctor requirements file. VM memory may
+# exceed the guest-visible Docker floor to allow for guest kernel overhead.
+ENV_REQUIREMENTS="$REPO_ROOT/.openbench/env-requirements.toml"
 COLIMA_DISK=100    # GiB
 
 PROFILE="${OBENCH_COLIMA_PROFILE:-default}"
@@ -47,6 +48,29 @@ info()  { printf "\033[36m[colima-benchmark]\033[0m %s\n" "$*"; }
 ok()    { printf "\033[32m  ✓\033[0m %s\n" "$*"; }
 warn()  { printf "\033[33m  ⚠\033[0m %s\n" "$*" >&2; }
 fail()  { printf "\033[31m  ✗\033[0m %s\n" "$*" >&2; exit 1; }
+
+load_resources() {
+  local resources
+  # Resolve against the caller's directory before run_doctor_gate changes it.
+  ENV_REQUIREMENTS="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).expanduser().resolve())' "$ENV_REQUIREMENTS")"
+  resources="$(python3 -c '
+import sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as stream:
+        data = tomllib.load(stream)
+    cpus, floor = data.get("cpus", 4), data.get("memory_gib", 12)
+    memory = data.get("colima_memory_gib", floor)
+    if any(type(v) is not int or v <= 0 for v in (cpus, floor, memory)):
+        raise ValueError("CPU and memory values must be positive integers")
+    if memory < floor:
+        raise ValueError("colima_memory_gib must be at least memory_gib")
+    print(cpus, memory)
+except (OSError, ValueError) as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
+' "$ENV_REQUIREMENTS")" || fail "cannot load resource requirements: $ENV_REQUIREMENTS"
+  read -r COLIMA_CPUS COLIMA_MEMORY <<<"$resources"
+}
 
 # ---- profile plumbing --------------------------------------------------------
 # Colima names the Docker context of its default profile "colima" and of any
@@ -203,7 +227,7 @@ smoke_test() {
 run_doctor_gate() {
   info "running obench doctor --docker-env preflight..."
   cd "$REPO_ROOT"
-  if DOCKER_CONTEXT="$(docker_context)" python3 -m obench.doctor --docker-env; then
+  if DOCKER_CONTEXT="$(docker_context)" python3 -m obench.doctor --docker-env --env-requirements "$ENV_REQUIREMENTS"; then
     ok "obench doctor --docker-env PASSED"
   else
     fail "obench doctor --docker-env FAILED — resolve the reported checks; use --provision-only only when campaign qualification will follow"
@@ -227,8 +251,13 @@ main() {
         PROFILE="$2"
         shift ;;
       --profile=*) PROFILE="${1#--profile=}" ;;
+      --env-requirements)
+        [ "$#" -ge 2 ] || fail "--env-requirements needs a TOML path"
+        ENV_REQUIREMENTS="$2"
+        shift ;;
+      --env-requirements=*) ENV_REQUIREMENTS="${1#--env-requirements=}" ;;
       --help|-h)
-        head -32 "$0"
+        head -33 "$0"
         exit 0 ;;
       *) fail "unknown argument: $1 (see --help)" ;;
     esac
@@ -250,8 +279,10 @@ main() {
     exit 0
   fi
 
+  load_resources
   info "=== OpenBench colima benchmark environment setup ==="
   info "Profile: ${PROFILE}  Pinned config: CPU=${COLIMA_CPUS}  Memory=${COLIMA_MEMORY}GiB  Disk=${COLIMA_DISK}GiB"
+  info "Doctor resource requirements: $ENV_REQUIREMENTS"
   echo ""
 
   start_colima "$action"

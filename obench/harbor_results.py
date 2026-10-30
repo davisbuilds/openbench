@@ -1158,14 +1158,20 @@ def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: fl
     scheme = 5 if expected_package is not None else 4 if expected_oracle is not None else 3
     if scheme == 5:
         identity = binding.get('evaluation_package')
+        descriptor = identity.get('evaluation') if isinstance(identity, dict) else None
+        key = descriptor.get('backend') if isinstance(descriptor, dict) else None
+        # Package backends are a closed set; v3 keeps the v2 browser protocol
+        # without becoming a scheme-4 task oracle.
+        protocol = {'activity-explorer-v2': 'browser-observations-v1',
+                    'activity-explorer-v3': 'browser-observations-v1',
+                    'artifact-review-v1': 'artifact-observations-v1'}.get(key) if isinstance(key, str) else None
         if (binding.get('scheme') != 5 or not isinstance(identity, dict)
                 or identity.get('sha256') != expected_package
                 or graded.get('evaluation_package') != identity
                 or graded.get('oracle_id') != 'private-evaluation'
-                or graded.get('protocol') != 'browser-observations-v1'
-                or identity.get('evaluation', {}).get('backend') not in ('activity-explorer-v2', 'activity-explorer-v3')):
+                or protocol is None or graded.get('protocol') != protocol):
             raise _fail(location, 'private evaluation differs from locked operator pin')
-        expected_oracle = identity['evaluation']['backend']  # protected browser observation contract
+        expected_oracle = key
     if scheme == 4:
         from .repair_oracles.registry import ORACLES
         oracle = ORACLES.get(expected_oracle)

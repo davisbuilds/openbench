@@ -1,0 +1,8 @@
+# Opt-in resource policy for a single trial at a time.
+# Reserve 6 GiB in Colima; require at least 5 GiB visible to Docker, allowing
+# for the guest kernel. These are policy floors, not measured workload needs.
+# Keep suite [run].concurrency = 1 and qualify the exact runtime and task.
+# Parallel admission retains its independent 10 GiB Docker headroom policy.
+cpus = 4
+memory_gib = 5
+colima_memory_gib = 6

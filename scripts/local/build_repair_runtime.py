@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--tag', default='openbench-local/repair-runtime:dev-v3-codex-0.162.0')
+    parser.add_argument('--tag', default='openbench-local/repair-runtime:dev-v4-codex-0.162.0')
     parser.add_argument('--receipt', type=Path, required=True)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='obench-runtime-build-') as d:
@@ -22,10 +22,18 @@ def main():
         (context / 'node').mkdir()
         for name in ('package.json', 'package-lock.json'):
             shutil.copyfile(ROOT / 'docker/repair-sandbox/node' / name, context / 'node' / name)
+        (context / 'tools').mkdir()
+        for name in ('package.json', 'package-lock.json'):
+            shutil.copyfile(ROOT / 'docker/repair-sandbox/tools' / name, context / 'tools' / name)
         (context / 'obench').mkdir()
         (context / 'obench/__init__.py').write_text('')
         shutil.copyfile(ROOT / 'obench/sandbox_gateway.py', context / 'obench/sandbox_gateway.py')
         shutil.copyfile(ROOT / 'obench/repair_devtools.py', context / 'obench/repair_devtools.py')
+        shutil.copyfile(ROOT / 'obench/runtime_trust.py', context / 'obench/runtime_trust.py')
+        (context / 'trust').mkdir()
+        shutil.copyfile(ROOT / 'docker/repair-sandbox/trust/blocked-root.pem', context / 'trust/blocked-root.pem')
+        (context / 'python').mkdir()
+        shutil.copyfile(ROOT / 'docker/repair-sandbox/python/requirements.txt', context / 'python/requirements.txt')
         # Campaign launchers intentionally use umask 077. These are public
         # runtime modules, and the confined UID must be able to import them.
         for path in context.rglob('*'):
@@ -51,7 +59,7 @@ def main():
                 '--security-opt', 'no-new-privileges', '--user', '10001:10001',
                 '--read-only', '--tmpfs', '/tmp:rw,exec,nosuid,nodev,size=512m,mode=1777',
                 '--tmpfs', '/home/solver:rw,nosuid,size=64m,uid=10001,gid=10001',
-                identity, 'python3', '-m', 'obench.repair_devtools', 'check'], text=True)
+                identity, 'bash', '-lc', 'python3 -m obench.repair_devtools check'], text=True)
             receipt = {'image_id': identity, 'tag': args.tag, 'context_sha256': hashes,
                        'codex_version': result.stdout.strip(), 'developer_environment': json.loads(developer)}
             args.receipt.parent.mkdir(parents=True, exist_ok=True)

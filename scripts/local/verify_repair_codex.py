@@ -121,13 +121,19 @@ async def run(args):
     receipt.update(task=str(args.task.resolve()), task_binding=inspected['task_binding'])
     app = args.task / 'environment/app'
     browser = inspected.get('browser') or inspected['revision']['oracle'] == 'activity-explorer'
-    registered = 'web/app.js' if browser else 'src/import/benchmark.ts' if (app / 'src').is_dir() else None
-    target = registered or 'scripts/profiles/__init__.py'
+    review = evaluation is not None and evaluation.load().descriptor['backend'] == 'artifact-review-v1'
+    registered = 'web/app.js' if browser else 'src/import/benchmark.ts' if not review and (app / 'src').is_dir() else None
+    target = 'submission/review.json' if review else registered or 'scripts/profiles/__init__.py'
     prefix = '//' if registered else '#'
     command = "set -eu\ntest -n \"${BASH_VERSION:-}\"\ntest \"$(printf '%s ' {alpha,beta})\" = 'alpha beta '\npython3 -m obench.repair_devtools check > /logs/agent/developer-workflow.json\n"
-    command += "test -z \"$(git status --porcelain)\"\ntest \"$(git rev-list --count HEAD)\" = 1\ntest -z \"$(git remote)\"\n"
+    commits = 2 if (app / '.openbench-review.json').is_file() else 1
+    command += f"test -z \"$(git status --porcelain)\"\ntest \"$(git rev-list --count HEAD)\" = {commits}\ntest -z \"$(git remote)\"\n"
+    if commits == 2:
+        command += "git diff --binary --full-index review-base HEAD > /tmp/actual-review.patch\ncmp review.patch /tmp/actual-review.patch\n"
     project_check = getattr(args, 'project_check', None)
-    if not project_check and (app / 'tests').is_dir():
+    if review and not project_check:
+        project_check = 'python3 -m json.tool submission/review.json >/dev/null'
+    elif not project_check and (app / 'tests').is_dir():
         project_check = 'pnpm run typecheck && pnpm test' if registered else 'python3 -m pytest -q'
     receipt['project_check'] = project_check
     if project_check:
@@ -277,7 +283,7 @@ async def run(args):
         if not registered:
             ast.parse(source)
         developer = json.loads((output / 'agent/developer-workflow.json').read_text())
-        required = {'git-baseline-diff', 'search', 'python-tests', 'typescript-check-run', 'typescript-lint', 'native-build', 'json', 'processes', 'cleanup'}
+        required = {'git-baseline-diff', 'git-review-diff', 'search', 'python-tests', 'go-tests', 'typescript-check-run', 'typescript-lint', 'native-build', 'json', 'processes', 'cleanup'}
         if set(developer['workflows']) != required:
             raise RuntimeError('developer workflow checks incomplete')
         # Completion of the single command is independently observed in Codex's

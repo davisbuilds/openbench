@@ -78,6 +78,7 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
         python = self.bin / "python3"
         python.write_text('#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "obench.doctor" ]; then\n'
                           ' echo "doctor DOCKER_CONTEXT=${DOCKER_CONTEXT:-} $*" >> "$STUB_LOG"\n'
+                          ' printf "%s\\n" "$@" > "$STUB_DIR/doctor-argv.txt"\n'
                           ' exit "${STUB_DOCTOR_EXIT:-0}"\nfi\nexec '
                           + shlex.quote(sys.executable) + ' "$@"\n')
         python.chmod(0o755)
@@ -103,7 +104,7 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
                    "STUB_LOG": str(self.log), "STUB_DIR": str(self.dir)}
         environ.update(env or {})
         result = subprocess.run(["bash", str(SCRIPT), *args], env=environ,
-                                capture_output=True, text=True, timeout=60)
+                                cwd=self.dir, capture_output=True, text=True, timeout=60)
         return result, self.log.read_text().splitlines()
 
     def colima_calls(self, calls, verb):
@@ -178,6 +179,49 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
         (start,) = self.colima_calls(calls, "start")
         self.assertIn("--cpu 4", start)
         self.assertIn("--memory 12", start)
+
+    def test_serial_requirements_leave_a_six_gib_profile_running(self):
+        self.running("openbench", 4, 6)
+        requirements = ROOT / ".openbench/env-requirements-serial.toml"
+        result, calls = self.run_script("--profile", "openbench", "--env-requirements", str(requirements))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.colima_calls(calls, "stop"), [])
+        self.assertEqual(self.colima_calls(calls, "start"), [])
+        self.assertIn(f"--env-requirements {requirements.resolve()}", next(c for c in calls if c.startswith("doctor ")))
+
+    def test_serial_restart_reserves_six_gib(self):
+        self.running("openbench", 4, 12)
+        requirements = ROOT / ".openbench/env-requirements-serial.toml"
+        result, calls = self.run_script("--profile", "openbench", "--restart", "--env-requirements", str(requirements))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (start,) = self.colima_calls(calls, "start")
+        self.assertIn("--cpu 4 --memory 6 --disk 100", start)
+
+    def test_selected_requirements_control_provisioning_and_doctor(self):
+        self.stopped()
+        requirements = self.dir / "custom resources.toml"
+        requirements.write_text("cpus = 5\nmemory_gib = 7\ncolima_memory_gib = 8\n")
+        result, calls = self.run_script("--profile", "openbench", f"--env-requirements={requirements.name}")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (start,) = self.colima_calls(calls, "start")
+        self.assertIn("--cpu 5 --memory 8 --disk 100", start)
+        self.assertEqual((self.dir / "doctor-argv.txt").read_text().splitlines(),
+                         ["-m", "obench.doctor", "--docker-env", "--env-requirements", str(requirements.resolve())])
+
+    def test_invalid_selected_requirements_fail_before_vm_mutation(self):
+        self.stopped()
+        requirements = self.dir / "invalid.toml"
+        for text in (None, "not TOML", "cpus = 0\nmemory_gib = 6\n",
+                     "cpus = true\nmemory_gib = 6\n", "cpus = 4\nmemory_gib = 0\n",
+                     "cpus = 4\nmemory_gib = 6\ncolima_memory_gib = 5\n"):
+            with self.subTest(text=text):
+                self.log.write_text("")
+                if text is not None:
+                    requirements.write_text(text)
+                result, calls = self.run_script("--env-requirements", str(requirements))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.colima_calls(calls, "start"), [])
+                self.assertEqual(self.colima_calls(calls, "stop"), [])
 
     def test_undersized_disk_is_restarted_with_the_pinned_floor(self):
         self.running("default", 4, 12, disk_gib=60)
