@@ -4,6 +4,21 @@ name: Harbor Integration
 # Package/image downloads are allowed; no live model request is made.
 on:
   pull_request:
+    # Prose-only PRs skip this workflow; every other path runs it. Nothing below
+    # reads docs/ or root prose files. Pushes to main always run. No branch
+    # protection requires this workflow today: if `sandbox` becomes a required
+    # check, replace this filter with an in-workflow change detector, because a
+    # skipped workflow leaves a required check pending.
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - 'CODE_OF_CONDUCT.md'
+      - 'SECURITY.md'
+      - 'LICENSE'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
   push:
     branches: [main]
   workflow_dispatch:

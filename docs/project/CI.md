@@ -43,6 +43,15 @@ needs a separate build, export and upload before any lane starts, whereas the
 two-minute cold builds already overlap across runners.
 Grading and fresh admission replay still run uncached.
 
+Pull requests that change only `docs/`, root prose files (`README.md`,
+`CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`,
+`LICENSE`) or GitHub issue/PR templates skip Harbor integration; none of its
+checks read those paths. Pushes to `main` always run it. CI is not filtered,
+because unit tests read published site data under `docs/`. Branch protection
+does not currently require any check. If `sandbox` becomes required, replace the
+workflow-level filter with an in-workflow change detector: a skipped workflow
+leaves a required check pending.
+
 The integration lane does not establish model accuracy or authenticated provider
 connectivity. Hosted Linux coverage complements local Docker-on-macOS checks.
 The browser lane also tests frozen evaluation-package replay and solver export
