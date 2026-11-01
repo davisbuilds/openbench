@@ -18,19 +18,39 @@ Keep the existing `test (3.11)`, `test (3.13)`, and `check` job names stable whe
 changing workflows. If required-check configuration is introduced or changed,
 coordinate its names with the jobs. Integration exercises the actual Harbor
 Trial lifecycle; whole-suite assembly/import also has offline contract tests.
-Harbor integration uses three independent hosted runners: repair, browser, and
-concurrency-repair controls. Each installs the same frozen graph, builds its own
-runtime, preserves all existing checks, and verifies cleanup. The `sandbox`
-aggregate remains the gate and succeeds only when every lane succeeds; a failed,
-cancelled, or skipped matrix cannot pass it. Summaries use lane-specific artifact
-names. Each lane has a 20-minute bound, with a two-minute aggregate job.
+Harbor integration uses five independent hosted runners: `repair-grading`
+(trajectory conversion, stream lifecycle, grading oracles, quality admission,
+sandbox boundaries, timeouts, artifact import and log export), `repair-tools`
+(Codex tool loops, developer workflows and frozen context), `concurrency`,
+`browser` (interactive review, sandbox boundaries, parallel lifecycles, grading
+import and package admission) and `browser-quality` (screenshot transport, then
+the browser controls that consume its receipt). Each installs the same frozen
+graph, builds its own runtime, preserves all existing checks, and verifies
+cleanup. The `sandbox` aggregate remains the gate and succeeds only when every
+lane succeeds; a failed, cancelled, or skipped matrix cannot pass it. Summaries
+use lane-specific artifact names. Each lane has a 20-minute bound, with a
+two-minute aggregate job.
 
-The previous serial job took 24m43s: browser quality/replay used 7m56s,
-concurrency controls 3m50s, and the base build 1m59s. Separating these workloads
-reduces the critical path at the cost of two extra cold image builds. Grading and
-fresh admission replay still run uncached. Runtime caches or fewer controls are
-not needed for this first optimization; compare hosted timings before further
-changes.
+The previous serial job took 24m43s. The three-lane split that followed took
+16-18 minutes, bound by a browser lane of about 17 minutes. Its browser-quality
+step alone takes about 8-9 minutes: it grades every control once for admission
+and again for fresh replay, serially, through the production validator. Lanes
+are now balanced on measured step times, so `browser-quality` (about 12 minutes)
+sets the critical path and the other lanes finish well inside it. Building the
+runtime once and sharing the image would not shorten that path: the browser
+image holds about 1 GB of compressed layers in a local build, and a shared image
+needs a separate build, export and upload before any lane starts, whereas the
+two-minute cold builds already overlap across runners.
+Grading and fresh admission replay still run uncached.
+
+Pull requests that change only `docs/`, root prose files (`README.md`,
+`CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`,
+`LICENSE`) or GitHub issue/PR templates skip Harbor integration; none of its
+checks read those paths. Pushes to `main` always run it. CI is not filtered,
+because unit tests read published site data under `docs/`. Branch protection
+does not currently require any check. If `sandbox` becomes required, replace the
+workflow-level filter with an in-workflow change detector: a skipped workflow
+leaves a required check pending.
 
 The integration lane does not establish model accuracy or authenticated provider
 connectivity. Hosted Linux coverage complements local Docker-on-macOS checks.
