@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Throwaway skip control for the browser-quality classifier; never merged.
 """Statistical report for the agent-harness comparison benchmark.
 
 Reads ``results/results.jsonl`` and prints, per ``(harness, model)`` arm:
