@@ -20,8 +20,10 @@ from a maintained file list:
    too, which covers ``Path(__file__).parent / 'name'`` lookups.
 4. The workflow and this classifier are always inputs.
 
-The input set is the union for the merge base and the head, so a deleted or
-newly referenced file is still matched. The lane runs when any file the pull
+The input set is the union for the merge base, the current base, the head and,
+when given, the merge revision CI actually tests. A deleted file, or a
+dependency the base branch added after the pull request branched, is still
+matched. The lane runs when any file the pull
 request changes is an input. Every error, unknown revision, shallow history or
 empty comparison selects running the lane; only a completed comparison with no
 matching path selects a skip.
@@ -235,9 +237,10 @@ def matches(path, files, directories):
     return path in files or any(path.startswith(d + '/') for d in directories)
 
 
-def decide(repo, base, head):
-    report = {'base': base, 'head': head}
-    for label, value in (('base', base), ('head', head)):
+def decide(repo, base, head, merged=None):
+    report = {'base': base, 'head': head, 'merged': merged}
+    revisions = (('base', base), ('head', head), *((('merged', merged),) if merged is not None else ()))
+    for label, value in revisions:
         if not SHA.fullmatch(value or ''):
             raise ValueError(f'{label} is not a full commit SHA: {value!r}')
     if git(repo, 'rev-parse', '--is-shallow-repository').strip() != 'false':
@@ -250,7 +253,7 @@ def decide(repo, base, head):
     if not changed:
         raise ValueError('the comparison found no changed files')
     files, directories = set(), set()
-    for rev in (merge_base, head):
+    for rev in dict.fromkeys((merge_base, base, head, *([merged] if merged else []))):
         rev_files, rev_directories = inputs(Tree(repo, rev))
         files |= rev_files
         directories |= rev_directories
@@ -268,6 +271,7 @@ def main(argv=None):
     parser.add_argument('--repo', default='.', help='Git repository (default: current directory)')
     parser.add_argument('--base', help='Base commit SHA of the pull request')
     parser.add_argument('--head', help='Head commit SHA of the pull request')
+    parser.add_argument('--merged', help='Commit SHA of the merge revision under test (optional)')
     parser.add_argument('--list', nargs='?', const='', metavar='REV',
                         help='Print the derived input set at REV (default: the working tree) '
                              'and exit; makes no decision')
@@ -278,9 +282,9 @@ def main(argv=None):
         print(json.dumps({'files': sorted(files), 'directories': sorted(directories)}, indent=2))
         return 0
     try:
-        report = decide(args.repo, args.base, args.head)
+        report = decide(args.repo, args.base, args.head, args.merged)
     except Exception as error:  # Fail closed: any doubt runs the lane.
-        report = {'base': args.base, 'head': args.head, 'run': True,
+        report = {'base': args.base, 'head': args.head, 'merged': args.merged, 'run': True,
                   'reason': f'fail-closed: {type(error).__name__}: {error}'}
     print(json.dumps(report, sort_keys=True))
     print('run=' + ('true' if report['run'] else 'false'))

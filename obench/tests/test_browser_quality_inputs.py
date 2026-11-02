@@ -159,6 +159,28 @@ class ClassifierTests(unittest.TestCase):
         self.assertTrue(report['run'])
         self.assertEqual(report['matched'], ['obench/b.py', 'obench/unrelated.py'])
 
+    def test_a_dependency_added_on_the_advancing_base_runs(self):
+        # The PR changes only unrelated.py, but main has since started
+        # importing it; the merged code CI tests reaches the change.
+        head = self.repo.change(['obench/unrelated.py'])
+        self.repo.git('checkout', '-q', 'main')
+        self.repo.write({'obench/b.py': 'from . import unrelated\n'})
+        advanced = self.repo.commit('main imports unrelated')
+        report = bqi.decide(str(self.repo.path), advanced, head)
+        self.assertTrue(report['run'], report)
+        self.assertEqual(report['matched'], ['obench/unrelated.py'])
+
+    def test_the_tested_merge_revision_contributes_inputs(self):
+        head = self.repo.change(['obench/unrelated.py'])
+        self.repo.git('checkout', '-q', '-B', 'merged', head)
+        self.repo.write({'obench/b.py': 'from . import unrelated\n'})
+        merged = self.repo.commit('merge result')
+        self.assertFalse(self.repo.decide(head)['run'])
+        report = bqi.decide(str(self.repo.path), self.repo.base, head, merged)
+        self.assertTrue(report['run'], report)
+        with self.assertRaises(ValueError):
+            bqi.decide(str(self.repo.path), self.repo.base, head, 'HEAD')
+
     def test_unknown_layout_fails_closed(self):
         self.repo.git('checkout', '-q', '-B', 'topic', self.repo.base)
         self.repo.write({'.github/workflows/harbor-integration.yml':

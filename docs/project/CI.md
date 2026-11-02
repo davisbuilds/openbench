@@ -77,8 +77,9 @@ there is no file list to maintain:
   beside the module, and non-Python files under `obench/`;
 - the workflow and the classifier are always inputs.
 
-The input set is the union for the merge base and the PR head, so deleting an
-input still runs the lane. It is deliberately coarse: an unused import or a path
+The input set is the union for the merge base, the current base, the PR head
+and the merge commit the run tests. Deleting an input, or a dependency the base
+branch gained after the PR branched, still runs the lane. It is deliberately coarse: an unused import or a path
 in help text can make the lane run, never skip. The closure currently holds
 about 114 files plus directories such as `obench/repair_oracles/` and
 `docker/browser-runtime/`. Print it with:

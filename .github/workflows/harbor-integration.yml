@@ -34,8 +34,9 @@ jobs:
   # browser-quality is the critical path, so pull requests run it only when a
   # changed file is one of its inputs. scripts/ci/browser_quality_inputs.py
   # derives those inputs from this workflow's lane steps and their Python
-  # import closure at the merge base and head. Any error, unknown revision or
-  # shallow history keeps the lane; pushes and manual runs always include it.
+  # import closure at the merge base, base, head and tested merge commit. Any
+  # error, unknown revision or shallow history keeps the lane; pushes and
+  # manual runs always include it.
   classify:
     runs-on: ubuntu-24.04
     # Full history of a small repository plus a stdlib classifier: well under
@@ -59,7 +60,9 @@ jobs:
           run=true
           if [ "$EVENT_NAME" = pull_request ]; then
             # Only a completed classification printing run=false skips.
-            if decision="$(python3 scripts/ci/browser_quality_inputs.py --base "$BASE_SHA" --head "$HEAD_SHA")"; then
+            # HEAD is the merge commit this run tests.
+            merged="$(git rev-parse HEAD)"
+            if decision="$(python3 scripts/ci/browser_quality_inputs.py --base "$BASE_SHA" --head "$HEAD_SHA" --merged "$merged")"; then
               printf '%s\n' "$decision"
               if [ "$(printf '%s\n' "$decision" | tail -n 1)" = run=false ]; then
                 run=false
