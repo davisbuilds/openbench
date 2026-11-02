@@ -27,9 +27,10 @@ import and package admission) and `browser-quality` (screenshot transport, then
 the browser controls that consume its receipt). Each installs the same frozen
 graph, builds its own runtime, preserves all existing checks, and verifies
 cleanup. The `sandbox` aggregate remains the gate and succeeds only when every
-lane succeeds; a failed, cancelled, or skipped matrix cannot pass it. Summaries
-use lane-specific artifact names. Each lane has a 20-minute bound, with a
-two-minute aggregate job.
+selected lane succeeds; a failed, cancelled, or skipped matrix cannot pass it.
+Pull requests may deselect `browser-quality` (see below). Summaries use
+lane-specific artifact names. Each lane has a 20-minute bound, with a five-minute
+`classify` job ahead of the lanes and a two-minute aggregate job.
 
 The previous serial job took 24m43s. The three-lane split that followed took
 16-18 minutes, bound by a browser lane of about 17 minutes. Its browser-quality
@@ -51,6 +52,52 @@ because unit tests read published site data under `docs/`. Branch protection
 does not currently require any check. If `sandbox` becomes required, replace the
 workflow-level filter with an in-workflow change detector: a skipped workflow
 leaves a required check pending.
+
+### browser-quality runs only when its inputs change
+
+On pull requests, a `classify` job runs before the lanes and drops
+`browser-quality` from the matrix when no changed file is one of its inputs. The
+other four lanes always run. Pushes to `main`, manual dispatches and every other
+event always include `browser-quality`. When it is skipped, `repair-tools`
+(about 8 minutes) becomes the critical path.
+
+`scripts/ci/browser_quality_inputs.py` derives the inputs from source each time;
+there is no file list to maintain:
+
+- every integration step the lane can run, which is any step not conditioned
+  exactly on `matrix.lane == '<another lane>'`, contributes the repository
+  paths it names: entry scripts, the activity-explorer task and the Harbor
+  dependency locks;
+- Python files are followed through their imports, with the same AST approach
+  as `obench/evidence_identity.py`. Literal `obench.*` names count; reaching the
+  adapter, Harbor-agent or oracle package includes every member. Bare imports
+  resolve to `scripts/ci` and `scripts/local`;
+- string literals in that closure add the tracked paths they name (runtime build
+  contexts under `docker/`, Dockerfiles, package locks, task directories), files
+  beside the module, and non-Python files under `obench/`;
+- the workflow and the classifier are always inputs.
+
+The input set is the union for the merge base and the PR head, so deleting an
+input still runs the lane. It is deliberately coarse: an unused import or a path
+in help text can make the lane run, never skip. The closure currently holds
+about 114 files plus directories such as `obench/repair_oracles/` and
+`docker/browser-runtime/`. Print it with:
+
+```sh
+python3 scripts/ci/browser_quality_inputs.py --list        # working tree
+python3 scripts/ci/browser_quality_inputs.py --base BASE_SHA --head HEAD_SHA
+```
+
+The classifier fails closed. A non-SHA or unknown revision, shallow history, an
+empty comparison, an unparseable source, or a workflow layout it does not
+recognize (no step conditioned on `browser-quality`, or a lane step naming no
+repository path) all select running the lane. The job's step summary records
+the decision and its log holds the JSON report: changed files and matched
+inputs. The `sandbox` gate accepts a missing `browser-quality` lane only when
+`classify` succeeded and chose the skip for a pull request. To force the lane,
+run the workflow manually (`gh workflow run harbor-integration.yml --ref
+BRANCH`) or change one of its inputs. The decision is computed from pull request
+code, as the workflow itself is; it is a cost control, not a trust boundary.
 
 The integration lane does not establish model accuracy or authenticated provider
 connectivity. Hosted Linux coverage complements local Docker-on-macOS checks.
