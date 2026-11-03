@@ -63,6 +63,30 @@ the PR, not as a "resolved" note here).
   Editing the fixtures is not an option: they are the benchmarked source and are
   bound by task digests and provenance.
 
+### Parallelize repair-quality control grading with the next grader change
+
+- **What**: `repair_validation.validate()` and `validate_receipt()` grade every
+  control serially. Grade them with bounded concurrency instead. The Harbor
+  `browser-quality` step runs about 62 sequential `grade_submission` calls: two
+  v1 attack controls, about 30 controls for admission, then all of them again as
+  a fresh admission replay. Campaign launch and dispatch admission replay
+  controls through the same path.
+- **Why**: that step took about 532s and its lane (12m29s) is the Harbor
+  integration critical path (run 41262953971). Bounded concurrency could bring
+  the step to about 200s and also shorten campaign launch and dispatch
+  admission (*hypothesis, unmeasured*). PRs that leave the lane's inputs
+  unchanged already skip it; this would speed up the runs that remain.
+- **Cost**: `repair_validation.py` is in the quality-receipt implementation hash
+  set (`_implementation_hashes()`), and it, `repair_grading.py` and
+  `sandbox_grading.py` are in the runtime-qualification fingerprint
+  (`evidence_identity.runtime_sources`). Changing them invalidates every quality
+  receipt and the runtime-qualification evidence.
+- **Risks**: CPU contention can change screenshot and timeout behavior, so
+  timeout-sensitive controls may need a lower bound or serial fallback.
+  Concurrent graders must not share container names or temporary directories.
+- **Revisit when**: the next change that already touches the hashed grader set,
+  so the invalidation costs nothing extra.
+
 ### Calibrate UI score interpretation and replay historical submissions
 
 - **What**: Keep strict completion, per-check diagnostics and blind design

@@ -31,8 +31,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # browser-quality is the critical path, so pull requests run it only when a
+  # changed file is one of its inputs. scripts/ci/browser_quality_inputs.py
+  # derives those inputs from this workflow's lane steps and their Python
+  # import closure at the merge base, base, head and tested merge commit. Any
+  # error, unknown revision or shallow history keeps the lane; pushes and
+  # manual runs always include it.
+  classify:
+    runs-on: ubuntu-24.04
+    # Full history of a small repository plus a stdlib classifier: well under
+    # a minute.
+    timeout-minutes: 5
+    outputs:
+      browser_quality: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Decide whether browser-quality inputs changed
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          run=true
+          if [ "$EVENT_NAME" = pull_request ]; then
+            # Only a completed classification printing run=false skips.
+            # HEAD is the merge commit this run tests.
+            merged="$(git rev-parse HEAD)"
+            if decision="$(python3 scripts/ci/browser_quality_inputs.py --base "$BASE_SHA" --head "$HEAD_SHA" --merged "$merged")"; then
+              printf '%s\n' "$decision"
+              if [ "$(printf '%s\n' "$decision" | tail -n 1)" = run=false ]; then
+                run=false
+              fi
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "browser-quality lane: run=$run ($EVENT_NAME)" >> "$GITHUB_STEP_SUMMARY"
+
   integration:
     name: integration (${{ matrix.lane }})
+    needs: classify
     runs-on: ubuntu-24.04
     # Measured serial job: 24m43s; the earlier three-lane split still took
     # 16-18 minutes, bound by its browser lane. Lanes are balanced on measured
@@ -45,7 +87,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [repair-grading, repair-tools, concurrency, browser, browser-quality]
+        # browser-quality is listed only when classify selected it.
+        lane: ${{ fromJSON(needs.classify.outputs.browser_quality == 'true' && '["repair-grading","repair-tools","concurrency","browser","browser-quality"]' || '["repair-grading","repair-tools","concurrency","browser"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -241,13 +284,25 @@ jobs:
 
   # Preserve the existing required-check name and fail closed if any matrix
   # lane fails or is cancelled. Skipped upstream jobs cannot satisfy the gate.
+  # browser-quality may be absent only when classify succeeded and chose to
+  # skip it for a pull request.
   sandbox:
     if: always()
-    needs: integration
+    needs: [classify, integration]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Require every integration lane
+      - name: Require every selected integration lane
         env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
-        run: test "$INTEGRATION_RESULT" = success
+          BROWSER_QUALITY: ${{ needs.classify.outputs.browser_quality }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          test "$CLASSIFY_RESULT" = success
+          test "$INTEGRATION_RESULT" = success
+          case "$BROWSER_QUALITY:$EVENT_NAME" in
+            true:*) echo 'Every lane ran and passed.' ;;
+            false:pull_request) echo 'browser-quality skipped: no changed file is one of its inputs.' ;;
+            *) echo "Unexpected browser-quality decision: '$BROWSER_QUALITY' for $EVENT_NAME"; exit 1 ;;
+          esac
