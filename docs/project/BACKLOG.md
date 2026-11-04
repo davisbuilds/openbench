@@ -22,6 +22,18 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
+### Qualify the browser CLI's separate video dependency
+
+- **What:** the browser runtime's stable Playwright installs FFmpeg 1013, while
+  the locked CLI alpha declares 1011. Browser launch qualification does not
+  establish CLI video recording support.
+- **Evidence:** the two installed core manifests have different FFmpeg revisions
+  (checked 2026-11-03); the preceding browser recipe installed only the stable
+  library's browser dependencies.
+- **Next:** when CLI video is needed, qualify its exact dependency and a real
+  recording in the sandboxed image, or update the CLI graph together. Keep this
+  separate from the Chrome CVE repair and from browser/worker admission.
+
 ### Drop the certifi exception from the bridge install (revisit 2026-10-28)
 
 - **What:** `obench/openmodel_bridge.sh` and `docs/guides/setup.md` pass
