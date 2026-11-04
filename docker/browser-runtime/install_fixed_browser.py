@@ -10,6 +10,7 @@ import os
 from pathlib import Path, PurePosixPath
 import platform
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -64,6 +65,25 @@ def browser_packages(node_modules):
     if not packages:
         raise ValueError('No installed Playwright core manifests')
     return packages
+
+
+def wrap_full_browser(executable):
+    """Give only Chrome a private config directory on a read-only runtime."""
+    executable = Path(executable)
+    vendor = executable.with_name(executable.name + '.vendor')
+    if vendor.exists():
+        raise ValueError('Browser vendor executable already exists')
+    vendor_sha256 = digest_file(executable)
+    executable.rename(vendor)
+    executable.write_text(
+        '#!/bin/sh\n'
+        'XDG_CONFIG_HOME=$(mktemp -d /tmp/openbench-chrome-config.XXXXXX) || exit 1\n'
+        'export XDG_CONFIG_HOME\n'
+        'exec ' + shlex.quote(str(vendor)) + ' "$@"\n')
+    executable.chmod(0o755)
+    return {'vendor_executable': str(vendor), 'vendor_executable_sha256': vendor_sha256,
+            'launcher_sha256': digest_file(executable),
+            'private_config': 'per-launch mode-0700 temporary directory under /tmp'}
 
 
 def install():
@@ -124,6 +144,16 @@ def install():
                     **replacement, 'reported_version': version,
                     'installed_executable': installed_executable,
                 })
+    # Full Chrome initializes Crashpad under XDG_CONFIG_HOME even with an
+    # isolated Playwright profile. The worker's HOME is intentionally read-only.
+    # Scope this override to Chrome; agent CLI/auth configuration stays intact.
+    launchers = {}
+    for browser in provenance['browsers']:
+        if browser['name'] == 'chromium':
+            executable = browser['installed_executable']
+            if executable not in launchers:
+                launchers[executable] = wrap_full_browser(executable)
+            browser['launcher'] = launchers[executable]
     # The CLI defaults to Playwright's supported Chrome channel on Linux.
     # Provide that path within this image, pointing at the same pinned full browser.
     full = subprocess.check_output(['node', '-e', "console.log(require('playwright').chromium.executablePath())"],

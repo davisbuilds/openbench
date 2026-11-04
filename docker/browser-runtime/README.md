@@ -22,6 +22,20 @@ it does not start those browsers. Finished-image qualification must launch those
 paths, exercise CLI open/snapshot, replay the current browser worker and a direct
 fixture, and renew the sandbox controls before use.
 
+Full Chrome runs through a launcher that gives only the browser process a new
+private configuration directory under the container's `/tmp`. This lets its
+crash handler initialize when the worker's home and root filesystem are
+read-only. Agent and authentication configuration retain their existing XDG
+environment. Provenance records the retained vendor executable and launcher
+hashes separately. Headless-shell bytes are unchanged by this launcher.
+
+Run `scripts/local/verify_fixed_browser_runtime.py --image sha256:… --output
+<new-receipt.json>` for default headless, full and Chrome-channel interactions
+through both cores, plus the default CLI's open/click/snapshot path. The helper
+uses the existing non-root, offline, read-only browser worker boundary and
+checks the actual browser version and absence of `--no-sandbox`. The browser CI
+lane runs this same control.
+
 The recipe retains stable Playwright's FFmpeg 1013 installation. The CLI alpha
 declares FFmpeg 1011; CLI video recording had no separately provisioned 1011 in
 the previous recipe and remains unqualified. This browser repair does not claim

@@ -1,9 +1,12 @@
 """Fixed browser inputs authenticate bytes and preserve executable layout."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import runpy
 import stat
+import shutil
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -12,9 +15,32 @@ import zipfile
 INSTALLER = Path(__file__).resolve().parents[2] / 'docker/browser-runtime/install_fixed_browser.py'
 extract = runpy.run_path(str(INSTALLER))['extract_verified_archive']
 browser_packages = runpy.run_path(str(INSTALLER))['browser_packages']
+wrap_full_browser = runpy.run_path(str(INSTALLER))['wrap_full_browser']
 
 
 class FixedBrowserInstallTests(unittest.TestCase):
+    def test_browser_private_config_preserves_arguments_and_harness_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / 'chrome'
+            executable.write_text('#!/bin/sh\nprintf "%s\\n" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$1"\n')
+            executable.chmod(0o755)
+            original = executable.read_bytes()
+            provenance = wrap_full_browser(executable)
+            env = dict(os.environ, XDG_CONFIG_HOME='/framework/config', XDG_CACHE_HOME='/framework/cache')
+            output = subprocess.check_output([str(executable), 'argument with spaces'], env=env, text=True).splitlines()
+            private_config = Path(output[0])
+            try:
+                self.assertEqual(private_config.parent, Path('/tmp'))
+                self.assertTrue(private_config.name.startswith('openbench-chrome-config.'))
+                self.assertEqual(private_config.stat().st_mode & 0o777, 0o700)
+                self.assertEqual(output[1:], ['/framework/cache', 'argument with spaces'])
+                self.assertEqual(Path(provenance['vendor_executable']).read_bytes(), original)
+                sibling = subprocess.check_output([provenance['vendor_executable'], 'sibling'], env=env, text=True).splitlines()
+                self.assertEqual(sibling, ['/framework/config', '/framework/cache', 'sibling'])
+                self.assertEqual(provenance['vendor_executable_sha256'], hashlib.sha256(original).hexdigest())
+            finally:
+                shutil.rmtree(private_config)
+
     def test_cli_alpha_and_nested_stable_core_manifests_are_both_discovered(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
