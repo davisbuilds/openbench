@@ -14,6 +14,19 @@ replacement executable's version. The installer records that distinction, the
 downloads and executable version checks in
 `/opt/browser-deps/fixed-browser-provenance.json` inside the image.
 
+The lock contains two Playwright cores: the stable library and the CLI's older
+alpha. The installer replaces both full/headless cache revisions and provides
+the Chrome-channel executable path inside the image. A build control captures
+every core's actual full/headless/Chrome spawn targets and rejects a mismatch;
+it does not start those browsers. Finished-image qualification must launch those
+paths, exercise CLI open/snapshot, replay the current browser worker and a direct
+fixture, and renew the sandbox controls before use.
+
+The recipe retains stable Playwright's FFmpeg 1013 installation. The CLI alpha
+declares FFmpeg 1011; CLI video recording had no separately provisioned 1011 in
+the previous recipe and remains unqualified. This browser repair does not claim
+to cover that preexisting video dependency gap.
+
 Build with `scripts/local/build_browser_runtime.py --base-image sha256:…
 --receipt <new-receipt.json>`. Its default tag is
 `openbench-local/browser-runtime:chrome-156.0.8078.80-v2`; retain older images and
