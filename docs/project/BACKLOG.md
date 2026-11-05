@@ -105,8 +105,8 @@ the PR, not as a "resolved" note here).
   serially (`obench validate --tasks-dir benchmarks/imported/terminal-bench`).
   With the unit suite parallel, this step is the largest left in those jobs.
 - **Evidence**: 63-89s of 340-390s jobs in recent main runs (41877154752,
-  41552474069, 41347406662), against about 35-50s for parallel unit tests
-  (*hypothesis for the hosted figure until its CI run is recorded*).
+  41552474069, 41347406662), against 64-71s for the parallel unit tests
+  (run 42069585588).
 - **Cost**: `obench/validate_tasks.py` is in the runtime-qualification
   fingerprint, so adding concurrency there invalidates qualification evidence.
   Running per-task invocations concurrently from the workflow avoids that, if

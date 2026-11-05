@@ -136,9 +136,13 @@ skipped in CI, and a full run writes nothing else in the checkout except
 outside a temporary directory, or cleanup that matches other tests' resources
 by name.
 
-Measured on Mac mini (10 cores) at the change: serial 240s; 4 workers 66-73s;
-8 workers 35-51s; 12-16 workers 26-31s. Hosted timings are in the PR that
-introduced the runner.
+Hosted (4 vCPUs), the serial step took 246-288s. With the runner it took 81-85s
+at 4 workers, 64-71s at 8 and 61-72s at 12; at 8 and above it is bound by
+CPU-heavy modules (`test_site`, `test_evidence_identity`, about 25s each alone,
+60-70s under contention). Twelve workers exposed a 0.2-second stall budget in
+`test_stall_kill`, since widened; prefer fewer workers to retrying a timing
+flake. On the Mac mini (10 cores): serial 240s, 8 workers 35-51s, 12-16
+workers 26-31s.
 
 ## Workflow baseline
 
