@@ -9,9 +9,13 @@ beyond the local package. Before opening a PR, run the same two checks CI runs
 
 ```
 pip install -e .
-python3 -m unittest discover -s obench/tests -v
+python3 scripts/ci/unit_tests.py
 obench validate
 ```
+
+The unit runner executes each test module in its own process, in parallel.
+`python3 -m unittest discover -s obench/tests -v` is the equivalent serial run
+(`python3 scripts/ci/unit_tests.py --workers 0`).
 
 ## 1. Contribute a task
 

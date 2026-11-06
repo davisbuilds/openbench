@@ -47,7 +47,12 @@ jobs:
           python -m pip install --no-build-isolation --no-deps -e .
 
       - name: Unit tests (offline — no live harness/API calls)
-        run: python3 -m unittest discover -s obench/tests -v
+        # One fresh interpreter per test module. The suite mostly waits on
+        # subprocesses and timers, so it uses more workers than the runner's
+        # four vCPUs; OBENCH_TEST_WORKERS=0 runs the serial reference command.
+        env:
+          OBENCH_TEST_WORKERS: "8"
+        run: python3 scripts/ci/unit_tests.py
 
       - name: Validate task checkers (fail-on-workspace / pass-on-solution)
         run: obench validate --no-imported

@@ -106,6 +106,44 @@ The browser lane also tests frozen evaluation-package replay and solver export
 boundaries with synthetic public fixtures. It neither accesses private scored
 packages nor grants their campaign admission.
 
+## Unit tests run one module per process
+
+`python3 scripts/ci/unit_tests.py` is the unit-test command for CI and local
+runs. It discovers the suite exactly as
+`python3 -m unittest discover -s obench/tests` does, then runs each test module
+in its own fresh interpreter from the repository root, several at a time. A
+module therefore never shares process state (environment, working directory,
+patched globals) with another module, which is stricter than the serial run.
+The run fails if any module fails or reports a different number of tests than
+discovery found in it, so a dropped or unimported module cannot pass silently.
+Failing modules print their full log and a single-module reproduction command.
+
+Workers default to `OBENCH_TEST_WORKERS`, else the CPU count. `--workers 0`
+(or `OBENCH_TEST_WORKERS=0`) runs the serial reference command unchanged; use
+it to rule the runner out when a failure appears only in parallel. The serial
+suite spends most of its time waiting on subprocesses and timers (about 30% of
+one core), so CI uses 8 workers on the hosted runner's 4 vCPUs. Known-slow
+modules start first (`SLOW_FIRST` in the runner; order only, so a stale entry
+changes wall time, never coverage). The floor is `test_sandbox_gateway`, about
+30 seconds, which the runtime-qualification fingerprint hashes and so is not
+split.
+
+Parallel safety rests on an audit of the suite: servers bind ephemeral ports,
+scratch files use `tempfile` or the per-call `.bench-tmp/` directories, the tmux
+control uses a random session name, real Docker tests are environment-gated and
+skipped in CI, and a full run writes nothing else in the checkout except
+`__pycache__`. Keep new tests to that contract: no fixed ports, fixed paths
+outside a temporary directory, or cleanup that matches other tests' resources
+by name.
+
+Hosted (4 vCPUs), the serial step took 246-288s. With the runner it took 81-85s
+at 4 workers, 64-71s at 8 and 61-72s at 12; at 8 and above it is bound by
+CPU-heavy modules (`test_site`, `test_evidence_identity`, about 25s each alone,
+60-70s under contention). Twelve workers exposed a 0.2-second stall budget in
+`test_stall_kill`, since widened; prefer fewer workers to retrying a timing
+flake. On the Mac mini (10 cores): serial 240s, 8 workers 35-51s, 12-16
+workers 26-31s.
+
 ## Workflow baseline
 
 Use full action commit SHAs with verified release comments, read-only top-level

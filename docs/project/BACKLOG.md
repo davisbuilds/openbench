@@ -99,6 +99,21 @@ the PR, not as a "resolved" note here).
 - **Revisit when**: the next change that already touches the hashed grader set,
   so the invalidation costs nothing extra.
 
+### Parallelize offline Terminal-Bench checker validation in CI
+
+- **What**: the CI `test` jobs validate the 10 imported Terminal-Bench tasks
+  serially (`obench validate --tasks-dir benchmarks/imported/terminal-bench`).
+  With the unit suite parallel, this step is the largest left in those jobs.
+- **Evidence**: 63-89s of 340-390s jobs in recent main runs (41877154752,
+  41552474069, 41347406662), against 64-71s for the parallel unit tests
+  (run 42069585588).
+- **Cost**: `obench/validate_tasks.py` is in the runtime-qualification
+  fingerprint, so adding concurrency there invalidates qualification evidence.
+  Running per-task invocations concurrently from the workflow avoids that, if
+  `--tasks-dir` output and exit codes stay aggregated correctly.
+- **Revisit when**: the next change that already touches `validate_tasks.py`,
+  or CI job time matters again.
+
 ### Calibrate UI score interpretation and replay historical submissions
 
 - **What**: Keep strict completion, per-check diagnostics and blind design

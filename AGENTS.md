@@ -155,7 +155,8 @@ Match [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 ```bash
 pip install -e .
-python3 -m unittest discover -s obench/tests -v
+python3 scripts/ci/unit_tests.py   # parallel; --workers 0 runs the serial reference:
+                                   # python3 -m unittest discover -s obench/tests -v
 obench validate --no-imported
 obench validate --tasks-dir benchmarks/imported/terminal-bench
 obench validate --tasks-dir benchmarks/imported/exercism

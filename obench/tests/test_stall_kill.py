@@ -383,7 +383,9 @@ class StallTerminationTests(unittest.TestCase):
                     str(adapters),
                     5,
                     proxy_ctx=proxy_ctx,
-                    stall_timeout=0.2,
+                    # The adapter must start and record its child before the
+                    # watchdog fires; 0.2s failed under CPU contention.
+                    stall_timeout=1.0,
                     workspace_observer=lambda workdir: owned_pids.append(
                         int(pathlib.Path(workdir, "owned.pid").read_text())
                     ),
