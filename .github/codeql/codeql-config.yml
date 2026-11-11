@@ -1,0 +1,21 @@
+name: Maintained OpenBench code
+
+# Task apps and golden solutions are versioned benchmark inputs, often
+# intentionally broken. Security fixes there would change the evaluation.
+# Distributed packs repeat those payloads. Retain checker_data and Harbor tests:
+# those verifiers still execute code and own score authority.
+# Keep exclusions rooted here rather than an allowlist of source directories so
+# new tools and repository workflows retain the default security suite.
+# A new maintained language also needs an entry in codeql.yml's language matrix.
+paths-ignore:
+  - 'benchmarks/**/workspace/**'
+  - 'benchmarks/**/solution/**'
+  - 'benchmarks/**/environment/app/**'
+  - 'benchmarks/**/checker_data/upstream/**'
+  - 'data/packs/**/workspace/**'
+  - 'data/packs/**/solution/**'
+  # Fixed AgentMonitor snapshots used by the Python concurrency controls. Keep
+  # their maintained driver.py and oracle.py in the scan.
+  - 'experiments/repair_cases/am123/source/**'
+  - 'experiments/repair_cases/am123/reference/**'
+  - 'experiments/repair_cases/am123/partial/**'

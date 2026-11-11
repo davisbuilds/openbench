@@ -1,0 +1,57 @@
+name: CodeQL
+
+# Advanced setup replaces GitHub's language autodetection over task payloads.
+# Disable default setup before expecting these analyses to upload successfully.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '37 6 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    # These interpreted languages need no application build or dependency install.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+          # Bind the CLI/query bundle to the reviewed action release.
+          tools: linked
+      - name: Analyze maintained source
+        id: analyze
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+      - name: Verify extracted-source controls
+        # db-locations is emitted before upload. Preserve extraction evidence if
+        # upload fails during migration, while retaining that step's failure.
+        if: ${{ always() && steps.analyze.outputs.db-locations != '' }}
+        env:
+          CODEQL_DATABASES: ${{ steps.analyze.outputs.db-locations }}
+          CODEQL_LANGUAGE: ${{ matrix.language }}
+        run: python3 scripts/ci/verify_codeql_scope.py
