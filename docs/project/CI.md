@@ -213,3 +213,5 @@ The browser lane also runs a wholly synthetic private-package campaign control:
 actual Codex tool execution, archive-read denial, fresh quality admission, and
 Harbor verifier/import checks for valid, malformed and forged-reward submissions.
 No private evaluation assets or credentials enter hosted CI.
+
+<!-- Temporary hosted CI skip-path probe; do not merge. -->
