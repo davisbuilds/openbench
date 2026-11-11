@@ -1,8 +1,14 @@
 """Interactive observation driver. Candidate JS runs only in sandboxed Chromium."""
 
+import json
+
+from .browser_runtime import PLAYWRIGHT_VERSIONS
+
+
 DRIVER = r'''
 const http=require('node:http'), readline=require('node:readline');
 const {chromium}=require('/opt/browser-deps/node_modules/playwright');
+const playwrightVersion=require('/opt/browser-deps/node_modules/playwright/package.json').version;
 let browser,context,page,server,origin,files={},fixture={},requests=0,targets=[];
 let errors=[],blocked=[];
 const bounded=(s,n=2048)=>String(s).slice(0,n);
@@ -22,7 +28,7 @@ async function boot(){
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin='http://127.0.0.1:'+server.address().port;
  browser=await chromium.launch({chromiumSandbox:true});
- if(require('/opt/browser-deps/node_modules/playwright/package.json').version!=='1.64.0')throw Error('review requires Playwright 1.64.0');
+ if(!SUPPORTED_PLAYWRIGHT_VERSIONS.includes(playwrightVersion))throw Error('review requires a qualified Playwright version');
 }
 async function reset(c){
  if(context)await context.close();
@@ -62,7 +68,7 @@ async function snapshot(){
   text:bounded(await page.locator('body').innerText(),24000),
   accessibility:bounded(await page.locator('body').ariaSnapshot(),30000),controls,
   screenshot:(await page.screenshot({type:'png',timeout:5000})).toString('base64'),
-  errors:[...errors],blocked:[...blocked],runtime:{playwright:'1.64.0',chromium:browser.version(),chromium_sandbox:true}};
+  errors:[...errors],blocked:[...blocked],runtime:{playwright:playwrightVersion,chromium:browser.version(),chromium_sandbox:true}};
 }
 async function act(c){
  if(!browser)await boot();
@@ -93,4 +99,4 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
   catch(e){process.stdout.write(JSON.stringify({ok:false,error:bounded(e.message)})+'\n');}
  });
 }).on('close',()=>queue.finally(async()=>{if(browser)await browser.close();if(server)server.close();}));
-'''
+'''.replace("SUPPORTED_PLAYWRIGHT_VERSIONS", json.dumps(PLAYWRIGHT_VERSIONS))

@@ -1187,6 +1187,9 @@ def _validate_suite_sandbox_policy(manifest):
                       if browser_v2 <= modules)
     browser_v3 = {'obench.browser_worker_v3', 'obench.repair_oracles.activity_explorer_v3'}
     accepted += tuple(modules | browser_v3 for modules in accepted if browser_v2 <= modules)
+    # Current browser graph checks are sealed; retain earlier manifest shapes.
+    accepted += tuple(modules | {'obench.browser_runtime'} for modules in accepted
+                      if browser_v3 <= modules)
     private_modules = {'obench.package_campaign', 'obench.evaluation_package', 'obench.repair_evidence'}
     if 'evaluation_package' in policy:
         identity = policy['evaluation_package']

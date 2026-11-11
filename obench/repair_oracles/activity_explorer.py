@@ -1,4 +1,5 @@
 """Activity explorer v1: host-owned predicates over confined browser observations."""
+from ..browser_runtime import PLAYWRIGHT_VERSIONS
 import re
 
 from ..browser_worker import program as worker_program
@@ -90,6 +91,6 @@ def validate_runtime(image):
     except CandidateFailure as exc:
         raise GradingError('sandboxed Chromium preflight failed') from exc
     value=results[0].get('value',{})
-    if value.get('playwright')!='1.64.0' or value.get('sandbox') is not True or not value.get('chromium'):
+    if value.get('playwright') not in PLAYWRIGHT_VERSIONS or value.get('sandbox') is not True or not value.get('chromium'):
         raise GradingError('browser runtime dependency mismatch')
     return value

@@ -22,17 +22,15 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
-### Qualify the browser CLI's separate video dependency
+### Qualify browser CLI video recording
 
-- **What:** the browser runtime's stable Playwright installs FFmpeg 1013, while
-  the locked CLI alpha declares 1011. Browser launch qualification does not
-  establish CLI video recording support.
-- **Evidence:** the two installed core manifests have different FFmpeg revisions
-  (checked 2026-11-03); the preceding browser recipe installed only the stable
-  library's browser dependencies.
-- **Next:** when CLI video is needed, qualify its exact dependency and a real
-  recording in the sandboxed image, or update the CLI graph together. Keep this
-  separate from the Chrome CVE repair and from browser/worker admission.
+- **What:** both locked Playwright cores now declare and install FFmpeg 1013,
+  but browser launch/snapshot qualification does not establish CLI video support.
+- **Evidence:** the Playwright 1.65.0 / CLI 0.1.23 manifests agree on FFmpeg 1013
+  (checked 2026-11-11). No real CLI recording has been qualified in the confined image.
+- **Next:** when video is needed, exercise an actual CLI recording and inspect
+  its output in the sandboxed runtime. Keep this separate from browser launch
+  qualification and campaign admission.
 
 ### Drop the certifi exception from the bridge install (revisit 2026-10-28)
 
@@ -74,6 +72,43 @@ the PR, not as a "resolved" note here).
   `docker/` scanned), then dismiss or let the 24 existing fixture alerts close.
   Editing the fixtures is not an option: they are the benchmarked source and are
   bound by task digests and provenance.
+
+### Distinguish import search paths from consumed browser-quality inputs
+
+- **What:** the browser-quality classifier treats the literal `scripts/ci`
+  import-search directory in `verify_browser_quality.py` as a consumed tree.
+  An unrelated script in that directory then selects the expensive lane.
+- **Evidence:** reviewed 2026-11-11, [PR #55's classifier](https://github.com/davisbuilds/openbench/actions/runs/42073379562/job/127407004664)
+  reported `scripts/ci/unit_tests.py` as its sole matched input; its
+  [browser-quality job](https://github.com/davisbuilds/openbench/actions/runs/42073379562/job/127407120520)
+  took 11m56s elapsed. That file is not an explicit quality input.
+- **Next:** exclude literal import-search roots from directory consumption while
+  preserving resolution of actual imports and fail-closed handling of unknowns.
+  Add an unrelated-script negative control and real-fixture/import positive controls.
+
+### Select relevant Harbor lanes on main and pull requests
+
+- **What:** main pushes always run all five Harbor integration lanes; pull-request
+  classification selects only whether to skip browser-quality. Each lane builds
+  a separate runtime even when its inputs did not change.
+- **Evidence:** reviewed 2026-11-11, [the November 6 main run](https://github.com/davisbuilds/openbench/actions/runs/42153044468)
+  summed to 41m43s across seven job elapsed intervals, while
+  [its preceding pull-request run](https://github.com/davisbuilds/openbench/actions/runs/42073379562)
+  summed to 41m48s. These are summed job durations, not CPU or billable minutes.
+- **Next:** extend dependency-aware lane selection to main comparisons and the
+  remaining lanes. Preserve relevant consumer/boundary checks, fail closed on
+  incomplete comparisons, and keep the aggregate gate honest about intentional skips.
+
+### Keep the weekly CLI advisory useful when repository Issues are disabled
+
+- **What:** the version check detects upstream changes but fails while creating
+  its advisory issue when repository Issues are disabled.
+- **Evidence:** reviewed 2026-11-11, [the November 3 check](https://github.com/davisbuilds/openbench/actions/runs/41622915057)
+  failed with “Issues has been disabled in this repository.” The repository's
+  Issues setting was disabled at inspection.
+- **Next:** retain the advisory in the workflow summary or an artifact when Issues
+  are unavailable; create/update an issue only when supported. Preserve useful
+  diagnostics and manual operation without recurring failed-run noise.
 
 ### Parallelize repair-quality control grading with the next grader change
 

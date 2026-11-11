@@ -55,7 +55,7 @@ else:
 
 
 class BrowserRuntimeBuildTests(unittest.TestCase):
-    def test_fixed_browser_inputs_are_readable_and_bound_into_the_receipt(self):
+    def test_upstream_browser_inputs_are_readable_and_bound_into_the_receipt(self):
         root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
@@ -89,10 +89,10 @@ else:
             self.assertEqual(result.returncode, 0, result.stderr)
             context = json.loads((temp / 'context.json').read_text())
             names = {'Dockerfile', 'package.json', 'package-lock.json',
-                     'fixed-browser-lock.json', 'install_fixed_browser.py', 'sandbox_gateway.py'}
+                     'install_browser_runtime.py', 'sandbox_gateway.py'}
             self.assertEqual(set(context['files']), names)
             self.assertEqual(context['tag'],
-                             'openbench-local/browser-runtime:chrome-156.0.8078.80-v2')
+                             'openbench-local/browser-runtime:playwright-1.65.0-v3')
             built = json.loads(receipt.read_text())
             self.assertEqual(set(built['inputs']), names)
             for name, recorded in context['files'].items():
@@ -102,8 +102,6 @@ else:
                 self.assertEqual(recorded['mode'], 0o644, name)
                 self.assertEqual(recorded['sha256'], expected, name)
                 self.assertEqual(built['inputs'][name], expected, name)
-            self.assertEqual(built['browser_source_lock'], json.loads(
-                (root / 'docker/browser-runtime/fixed-browser-lock.json').read_text()))
             self.assertIn('qualification required', built['status'])
 
     def test_supported_base_revisions_build_and_future_revision_is_rejected(self):

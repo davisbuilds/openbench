@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .atif import validate_trajectory
+from .browser_runtime import PLAYWRIGHT_VERSIONS
 from .harbor_metering import (
     HarborMeteringError,
     UsageCounters,
@@ -1228,7 +1229,7 @@ def _validate_sandbox_receipt(trial_dir: Path, digest: dict[str, Any], score: fl
             raise _fail(location, 'browser worker policy differs from the admitted policy')
         runtime = worker.get('runtime_dependencies', {})
         if (not isinstance(runtime, dict) or runtime.get('sandbox') is not True
-                or runtime.get('playwright') != '1.64.0' or not runtime.get('chromium')):
+                or runtime.get('playwright') not in PLAYWRIGHT_VERSIONS or not runtime.get('chromium')):
             raise _fail(location, 'missing sandboxed browser runtime evidence')
         if expected_oracle in ('activity-explorer-v2', 'activity-explorer-v3') and (
                 runtime.get('observer') != 'cdp-isolated-world-v2' or runtime.get('isolated_world') is not True):

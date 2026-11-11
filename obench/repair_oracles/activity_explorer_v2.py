@@ -1,4 +1,5 @@
 """Activity explorer v2: isolated observations, equivalent detail semantics, diagnostics."""
+from ..browser_runtime import PLAYWRIGHT_VERSIONS
 from .activity_explorer import cases, contains_text
 from ..browser_worker_v2 import program as worker_program
 
@@ -110,7 +111,7 @@ def validate_runtime(image):
     except CandidateFailure as exc:
         raise GradingError('isolated browser observer preflight failed') from exc
     value = result[0].get('value', {})
-    if (value.get('playwright') != '1.64.0' or value.get('sandbox') is not True
+    if (value.get('playwright') not in PLAYWRIGHT_VERSIONS or value.get('sandbox') is not True
             or value.get('isolated_world') is not True or not value.get('chromium')):
         raise GradingError('isolated browser observer dependency mismatch')
     return value
