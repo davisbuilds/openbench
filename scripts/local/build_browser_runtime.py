@@ -17,7 +17,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-image',required=True)
     parser.add_argument('--receipt',required=True,type=Path)
-    parser.add_argument('--tag',default='openbench-local/browser-runtime:chrome-156.0.8078.80-v2')
+    parser.add_argument('--tag',default='openbench-local/browser-runtime:playwright-1.65.0-v3')
     args=parser.parse_args()
     if not re.fullmatch(r'sha256:[a-f0-9]{64}',args.base_image): parser.error('base must be a local immutable image ID')
     if args.receipt.exists(): parser.error('receipt already exists; preserve prior evidence')
@@ -30,19 +30,17 @@ def main():
         with tempfile.TemporaryDirectory(prefix='obench-browser-build-') as temp:
             root=Path(temp)
             for name in ('Dockerfile','package.json','package-lock.json',
-                         'fixed-browser-lock.json','install_fixed_browser.py'):
+                         'install_browser_runtime.py'):
                 shutil.copyfile(ROOT/'docker/browser-runtime'/name,root/name)
             shutil.copyfile(ROOT/'obench/sandbox_gateway.py',root/'sandbox_gateway.py')
             for p in root.iterdir(): p.chmod(0o644)
             hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.iterdir()}
-            browser_source_lock=json.loads((root/'fixed-browser-lock.json').read_text())
             iid=root/'image-id.txt'
             subprocess.run(['docker','build','--build-arg','BASE_IMAGE='+tag,'--tag',args.tag,'--iidfile',str(iid),str(root)],check=True)
             image=iid.read_text().strip()
             args.receipt.parent.mkdir(parents=True,exist_ok=True)
             with args.receipt.open('x') as output:
                 json.dump({'image_id':image,'base_image_id':args.base_image,'inputs':hashes,
-                           'browser_source_lock':browser_source_lock,
                            'status':'built; browser and harness qualification required'},output,indent=2)
             print(image)
     finally:

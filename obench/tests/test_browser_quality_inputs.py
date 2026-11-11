@@ -269,8 +269,7 @@ class RealWorkflowTests(unittest.TestCase):
 
     def test_browser_download_inputs_and_future_context_files_are_covered(self):
         self.assertIn('docker/browser-runtime', self.directories)
-        for path in ('docker/browser-runtime/fixed-browser-lock.json',
-                     'docker/browser-runtime/install_fixed_browser.py',
+        for path in ('docker/browser-runtime/install_browser_runtime.py',
                      'docker/browser-runtime/future-assets/browser-manifest.json'):
             with self.subTest(path=path):
                 self.assertTrue(self.covered(path))
