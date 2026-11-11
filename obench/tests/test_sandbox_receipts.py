@@ -88,7 +88,13 @@ class SandboxReceiptTests(unittest.TestCase):
             def check():
                 (self.verifier/'sandbox-grading.json').write_text(json.dumps(self.receipt))
                 return _validate_sandbox_receipt(self.root,self.digest,1,'test',expected_oracle=oracle)
-            check()
+            for version in ('1.64.0', '1.65.0'):
+                runtime['playwright'] = version
+                check()
+            runtime['playwright'] = '1.66.0'
+            with self.assertRaisesRegex(ValueError, 'browser runtime evidence'):
+                check()
+            runtime['playwright'] = '1.65.0'
             runtime.pop('isolated_world')
             if oracle.endswith('v2'):
                 with self.assertRaisesRegex(ValueError,'isolated browser observer'):check()

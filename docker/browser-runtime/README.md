@@ -8,7 +8,9 @@ The v3 recipe installs the Chromium full browser, headless shell and FFmpeg
 selected by each exact locked Playwright core through its upstream installer.
 Playwright 1.65.0 selects Chromium 158.0.8127.18 (revision 1254); CLI 0.1.23's
 core 1.65.0-alpha-2026-10-30 selects Chromium 157.0.8103.15 (revision 1252).
-Both clear the CVE-2026-76024 floor of 156.0.8078.79. No external Chrome pin,
+Current preflights, interactive review and receipt import accept exactly the
+qualified 1.65.0 library and historical 1.64.0 evidence; image identity and
+actual browser checks remain separate. Both upstream browser versions clear the CVE-2026-76024 floor of 156.0.8078.79. No external Chrome pin,
 archive replacement or browser-manifest rewrite is used. The Chrome channel
 used by the default CLI points to the stable library's upstream full browser.
 
