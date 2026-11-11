@@ -39,70 +39,31 @@ jobs:
         shell: bash
         run: |
           set +e
-          python3 -m obench.bump_clis --check-upstream | tee cli-version-report.txt
+          python3 -m obench.bump_clis --check-upstream 2>&1 | tee cli-version-report.txt
           status=${PIPESTATUS[0]}
           set -e
-          if [[ "$status" -eq 1 ]]; then
-            echo "behind=true" >> "$GITHUB_OUTPUT"
-          elif [[ "$status" -eq 0 ]]; then
-            echo "behind=false" >> "$GITHUB_OUTPUT"
-          else
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [[ "$status" -ne 0 && "$status" -ne 1 ]]; then
             exit "$status"
           fi
 
-      - name: Open or update version bump issue
-        if: steps.version-check.outputs.behind == 'true'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - name: Retain advisory and open or update issue when enabled
+        if: always() && steps.version-check.outputs.status != ''
         env:
-          REPORT_PATH: cli-version-report.txt
-        with:
-          script: |
-            const fs = require('fs');
-            const title = 'CLI version bumps available';
-            const marker = '<!-- openbench-cli-version-check -->';
-            const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8').trim();
-            const body = [
-              marker,
-              'The weekly upstream check found Dockerfile CLI pins behind npm’s latest published tags.',
-              '',
-              '```text',
-              report,
-              '```',
-              '',
-              'Review releases and validate a new pinned runtime before adopting updates.',
-              'These pins describe the compatibility harness image. Repair sandboxes also pin Codex in',
-              '`docker/repair-sandbox/Dockerfile` and `obench/harbor_agents/sandbox_codex.py`.',
-              'Do not update a host CLI or runtime during a frozen campaign.',
-              '',
-              '```bash',
-              'python3 -m obench.bump_clis --apply',
-              'docker build -t openbench-harness:latest obench/docker',
-              '```',
-              '',
-              'This workflow reports only; it never changes pins or opens a pull request.',
-            ].join('\n');
+          GH_TOKEN: ${{ github.token }}
+          VERSION_CHECK_STATUS: ${{ steps.version-check.outputs.status }}
+        run: >-
+          python3 scripts/ci/cli_version_advisory.py
+          --report cli-version-report.txt
+          --check-status "$VERSION_CHECK_STATUS"
 
-            const issues = await github.paginate(github.rest.issues.listForRepo, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              per_page: 100,
-            });
-            const existing = issues.find(issue =>
-              !issue.pull_request && issue.title === title && issue.body?.includes(marker)
-            );
-            if (existing) {
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: existing.number,
-                body,
-              });
-            } else {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title,
-                body,
-              });
-            }
+      - name: Preserve CLI version advisory
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-version-advisory
+          path: |
+            cli-version-report.txt
+            cli-version-advisory.md
+          if-no-files-found: warn
+          retention-days: 14
