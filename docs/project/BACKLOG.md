@@ -58,58 +58,6 @@ the PR, not as a "resolved" note here).
   VM checks; current pinned-image and campaign qualification evidence remains
   required before dispatch. Never treat skipped doctor checks as passed.
 
-### Scope CodeQL away from frozen benchmark fixtures
-
-- **What**: CodeQL default setup scans the historical application copies under
-  `benchmarks/harbor/local/*/environment/app/`. Every new fixture revision copies
-  the same source, and the PR check then reports the copied code's alerts as new.
-- **Evidence**: #48 failed the CodeQL check with 8 alerts (5 critical, 3 high),
-  all in the c3-o3 AgentMonitor copy; they were dismissed as "used in tests".
-  Main still has the same 8 alerts open in each of the v3, v4 and c2-o3 copies (24).
-  Default setup cannot exclude paths.
-- **Next**: switch to an advanced-setup CodeQL workflow with a config that
-  `paths-ignore`s fixture application trees (keeping `obench/`, `scripts/` and
-  `docker/` scanned), then dismiss or let the 24 existing fixture alerts close.
-  Editing the fixtures is not an option: they are the benchmarked source and are
-  bound by task digests and provenance.
-
-### Distinguish import search paths from consumed browser-quality inputs
-
-- **What:** the browser-quality classifier treats the literal `scripts/ci`
-  import-search directory in `verify_browser_quality.py` as a consumed tree.
-  An unrelated script in that directory then selects the expensive lane.
-- **Evidence:** reviewed 2026-11-11, [PR #55's classifier](https://github.com/davisbuilds/openbench/actions/runs/42073379562/job/127407004664)
-  reported `scripts/ci/unit_tests.py` as its sole matched input; its
-  [browser-quality job](https://github.com/davisbuilds/openbench/actions/runs/42073379562/job/127407120520)
-  took 11m56s elapsed. That file is not an explicit quality input.
-- **Next:** exclude literal import-search roots from directory consumption while
-  preserving resolution of actual imports and fail-closed handling of unknowns.
-  Add an unrelated-script negative control and real-fixture/import positive controls.
-
-### Select relevant Harbor lanes on main and pull requests
-
-- **What:** main pushes always run all five Harbor integration lanes; pull-request
-  classification selects only whether to skip browser-quality. Each lane builds
-  a separate runtime even when its inputs did not change.
-- **Evidence:** reviewed 2026-11-11, [the November 6 main run](https://github.com/davisbuilds/openbench/actions/runs/42153044468)
-  summed to 41m43s across seven job elapsed intervals, while
-  [its preceding pull-request run](https://github.com/davisbuilds/openbench/actions/runs/42073379562)
-  summed to 41m48s. These are summed job durations, not CPU or billable minutes.
-- **Next:** extend dependency-aware lane selection to main comparisons and the
-  remaining lanes. Preserve relevant consumer/boundary checks, fail closed on
-  incomplete comparisons, and keep the aggregate gate honest about intentional skips.
-
-### Keep the weekly CLI advisory useful when repository Issues are disabled
-
-- **What:** the version check detects upstream changes but fails while creating
-  its advisory issue when repository Issues are disabled.
-- **Evidence:** reviewed 2026-11-11, [the November 3 check](https://github.com/davisbuilds/openbench/actions/runs/41622915057)
-  failed with “Issues has been disabled in this repository.” The repository's
-  Issues setting was disabled at inspection.
-- **Next:** retain the advisory in the workflow summary or an artifact when Issues
-  are unavailable; create/update an issue only when supported. Preserve useful
-  diagnostics and manual operation without recurring failed-run noise.
-
 ### Parallelize repair-quality control grading with the next grader change
 
 - **What**: `repair_validation.validate()` and `validate_receipt()` grade every

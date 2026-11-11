@@ -4,21 +4,6 @@ name: Harbor Integration
 # Package/image downloads are allowed; no live model request is made.
 on:
   pull_request:
-    # Prose-only PRs skip this workflow; every other path runs it. Nothing below
-    # reads docs/ or root prose files. Pushes to main always run. No branch
-    # protection requires this workflow today: if `sandbox` becomes a required
-    # check, replace this filter with an in-workflow change detector, because a
-    # skipped workflow leaves a required check pending.
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
-      - 'CHANGELOG.md'
-      - 'CONTRIBUTING.md'
-      - 'CODE_OF_CONDUCT.md'
-      - 'SECURITY.md'
-      - 'LICENSE'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/PULL_REQUEST_TEMPLATE.md'
   push:
     branches: [main]
   workflow_dispatch:
@@ -31,50 +16,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # browser-quality is the critical path, so pull requests run it only when a
-  # changed file is one of its inputs. scripts/ci/browser_quality_inputs.py
-  # derives those inputs from this workflow's lane steps and their Python
-  # import closure at the merge base, base, head and tested merge commit. Any
-  # error, unknown revision or shallow history keeps the lane; pushes and
-  # manual runs always include it.
+  # Derive each lane's inputs on PR and main comparisons. Unknown history or
+  # layout runs all lanes; manual dispatch always forces the complete matrix.
   classify:
     runs-on: ubuntu-24.04
-    # Full history of a small repository plus a stdlib classifier: well under
-    # a minute.
     timeout-minutes: 5
     outputs:
-      browser_quality: ${{ steps.decide.outputs.run }}
+      run: ${{ steps.decide.outputs.run }}
+      matrix: ${{ steps.decide.outputs.matrix }}
+      decision: ${{ steps.decide.outputs.decision }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'pull_request'
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Decide whether browser-quality inputs changed
+      - name: Select affected integration lanes
         id: decide
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          run=true
-          if [ "$EVENT_NAME" = pull_request ]; then
-            # Only a completed classification printing run=false skips.
-            # HEAD is the merge commit this run tests.
-            merged="$(git rev-parse HEAD)"
-            if decision="$(python3 scripts/ci/browser_quality_inputs.py --base "$BASE_SHA" --head "$HEAD_SHA" --merged "$merged")"; then
-              printf '%s\n' "$decision"
-              if [ "$(printf '%s\n' "$decision" | tail -n 1)" = run=false ]; then
-                run=false
-              fi
-            fi
-          fi
-          echo "run=$run" >> "$GITHUB_OUTPUT"
-          echo "browser-quality lane: run=$run ($EVENT_NAME)" >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/ci/harbor_ci.py classify --event "$EVENT_NAME" \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --merged "$(git rev-parse HEAD)"
 
   integration:
     name: integration (${{ matrix.lane }})
     needs: classify
+    if: needs.classify.outputs.run == 'true'
     runs-on: ubuntu-24.04
     # Measured serial job: 24m43s; the earlier three-lane split still took
     # 16-18 minutes, bound by its browser lane. Lanes are balanced on measured
@@ -87,8 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # browser-quality is listed only when classify selected it.
-        lane: ${{ fromJSON(needs.classify.outputs.browser_quality == 'true' && '["repair-grading","repair-tools","concurrency","browser","browser-quality"]' || '["repair-grading","repair-tools","concurrency","browser"]') }}
+        lane: ${{ fromJSON(needs.classify.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -287,27 +255,24 @@ jobs:
             exit 1
           fi
 
-  # Preserve the existing required-check name and fail closed if any matrix
-  # lane fails or is cancelled. Skipped upstream jobs cannot satisfy the gate.
-  # browser-quality may be absent only when classify succeeded and chose to
-  # skip it for a pull request.
+  # Preserve the existing gate name. An empty matrix passes only with a
+  # successful, complete classification and the integration job skipped.
   sandbox:
     if: always()
     needs: [classify, integration]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Require every selected integration lane
         env:
           CLASSIFY_RESULT: ${{ needs.classify.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
-          BROWSER_QUALITY: ${{ needs.classify.outputs.browser_quality }}
+          DECISION: ${{ needs.classify.outputs.decision }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          test "$CLASSIFY_RESULT" = success
-          test "$INTEGRATION_RESULT" = success
-          case "$BROWSER_QUALITY:$EVENT_NAME" in
-            true:*) echo 'Every lane ran and passed.' ;;
-            false:pull_request) echo 'browser-quality skipped: no changed file is one of its inputs.' ;;
-            *) echo "Unexpected browser-quality decision: '$BROWSER_QUALITY' for $EVENT_NAME"; exit 1 ;;
-          esac
+          python3 scripts/ci/harbor_ci.py gate --event "$EVENT_NAME" \
+            --classify-result "$CLASSIFY_RESULT" --integration-result "$INTEGRATION_RESULT" \
+            --decision "$DECISION"
