@@ -93,6 +93,26 @@ Route integrity fails closed when required evidence is absent or contradictory:
 served model, provider, requested-model metadata, terminal stream state, or
 single-attempt evidence where the gateway exposes it.
 
+### Upstream HTTP responses
+
+The counting proxy validates upstream status text and parsed headers before
+sending a response. Invalid names, control characters (including obsolete line
+folding), parser defects, conflicting lengths, and unsupported transfer codings
+produce a clean `502`. Only the `chunked` transfer coding decoded by the stdlib
+is supported; combining it with `Content-Length` is rejected. Identical duplicate
+lengths collapse to one. Other repeated end-to-end fields remain intact, while
+hop-by-hop fields and every `Connection`-nominated field are removed.
+
+The spike and ablation capture proxies share this policy. Capture preserves
+content encoding and emits one length for its buffered body; the counting proxy
+continues to stream SSE without waiting for upstream EOF. These checks cover
+response serialization, not upstream trust or every HTTP grammar edge case.
+
+Run the credential-free raw-socket controls with
+`python3 -m unittest obench.tests.test_proxy_response_headers`. They exercise all
+three real handlers against disposable localhost upstreams, including malformed
+responses, valid compression/duplicates/error statuses, and streamed data.
+
 ## Metrics
 
 Reports retain per-metric coverage and use equal task weighting.

@@ -30,11 +30,8 @@ from urllib.parse import quote, urlsplit
 from obench import gateway_profiles, gateway_spec
 from obench.gateway_metrics import sse_parser
 from obench.gateway_spec import TRACK, RoutePlan, SecretPlan
+from obench.http_response import HOP_BY_HOP, forward_response_headers
 
-HOP_BY_HOP = {
-    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
-    "te", "trailer", "transfer-encoding", "upgrade", "host",
-}
 SENSITIVE_HEADERS = {
     "authorization", "x-api-key", "api-key", "anthropic-api-key", "cookie",
     "set-cookie", "openai-api-key",
@@ -474,6 +471,8 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
         gateway_metrics = None
         cache_control = None
         forwarded_upstream = False
+        conn = None
+        resp = None
         try:
             route = self._route_request()
             token = route.token
@@ -528,6 +527,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             conn.request(self.command, route.upstream_path, body=body, headers=headers)
             forwarded_upstream = True
             resp = conn.getresponse()
+            forwarded_headers = forward_response_headers(resp)
             status = resp.status
             resp_headers = resp.getheaders()
             if route.gateway_route is not None and 300 <= resp.status < 400:
@@ -551,9 +551,7 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                     response_headers=header_map,
                 )
             self.send_response(resp.status, resp.reason)
-            for key, value in resp_headers:
-                if key.lower() in HOP_BY_HOP:
-                    continue
+            for key, value in forwarded_headers:
                 self.send_header(key, value)
             self.send_header("Connection", "close")
             self.close_connection = True
@@ -587,15 +585,17 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
                 usage = gateway_metrics["usage"]
             cost_usd, cost_source = extract_cost(usage, header_map)
             links.update(protocol_links(parse_body, response=True))
-            conn.close()
         except Exception as exc:  # noqa: BLE001
             error = f"{type(exc).__name__}: {exc}"
             if not headers_sent and not self.wfile.closed:
+                status = 502
+                self.close_connection = True
                 payload = json.dumps({"error": "proxy_upstream_failed"}).encode()
                 try:
                     self.send_response(502)
                     self.send_header("content-type", "application/json")
                     self.send_header("content-length", str(len(payload)))
+                    self.send_header("connection", "close")
                     self.end_headers()
                     self.wfile.write(payload)
                 except Exception:
@@ -603,6 +603,10 @@ class CountingProxyHandler(BaseHTTPRequestHandler):
             else:
                 self.close_connection = True
         finally:
+            if resp is not None:
+                resp.close()
+            if conn is not None:
+                conn.close()
             if gateway_parser is not None and gateway_metrics is None:
                 try:
                     gateway_metrics = gateway_parser.finalize(time.monotonic())
