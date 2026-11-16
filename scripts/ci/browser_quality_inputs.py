@@ -1,36 +1,17 @@
 #!/usr/bin/env python3
-"""Decide whether a pull request can skip the Harbor browser-quality lane.
+"""Derive a Harbor lane's source inputs and decide whether its changes need CI.
 
-The lane's inputs are derived from source at both ends of the comparison, not
-from a maintained file list:
+Workflow steps, Python imports and literal runtime paths define each lane's
+closure. Only exact lane equality and startsWith conditions can exclude steps;
+unknown conditions remain applicable. Import-search directories resolve concrete
+modules rather than selecting every sibling script. Runtime directory uses still
+select every member, and unresolvable script search roots fail closed.
 
-1. Steps in the Harbor workflow's integration job that can run for the
-   browser-quality lane name its entry scripts, task, and dependency locks.
-   A step is excluded only when its condition is exactly
-   ``matrix.lane == '<another lane>'``; any other condition counts as
-   applicable.
-2. Python sources are followed through their imports, as
-   ``obench/evidence_identity.py`` does: literal ``obench.*`` names in strings
-   count, and reaching the adapter, Harbor-agent or oracle package includes
-   every member, because those families also load by name. Bare imports
-   resolve to scripts on the lane's added ``sys.path`` entries.
-3. String literals in that closure that name a tracked path add it (build
-   contexts, Dockerfiles, package locks, task directories). A literal naming
-   a file beside the module, or a non-Python file under ``obench/``, adds it
-   too, which covers ``Path(__file__).parent / 'name'`` lookups.
-4. The workflow and this classifier are always inputs.
-
-The input set is the union for the merge base, the current base, the head and,
-when given, the merge revision CI actually tests. A deleted file, or a
-dependency the base branch added after the pull request branched, is still
-matched. The lane runs when any file the pull
-request changes is an input. Every error, unknown revision, shallow history or
-empty comparison selects running the lane; only a completed comparison with no
-matching path selects a skip.
-
-Prints one JSON report line, then ``run=true`` or ``run=false`` as the last
-line. Exit status is 0 whenever a decision was printed, including the
-fail-closed decision to run after an error.
+Pull requests union closures from merge base, base, head and the tested merge;
+pushes compare exact before/after endpoints and union their closures. Invalid or
+shallow history, empty comparisons and unrecognized source layouts fail closed.
+The CLI prints JSON and a final run=true/false line, defaulting to browser-quality
+for compatibility. Exceptions in the reusable API are handled by the caller.
 """
 import argparse
 import ast
@@ -42,18 +23,19 @@ import sys
 
 WORKFLOW = '.github/workflows/harbor-integration.yml'
 JOB = 'integration'
+LANES = ('repair-grading', 'repair-tools', 'concurrency', 'browser', 'browser-quality')
 LANE = 'browser-quality'
 CLASSIFIER = 'scripts/ci/browser_quality_inputs.py'
+DRIVER = 'scripts/ci/harbor_ci.py'
 # Families that also load by filename or registry string; mirrors
 # obench.evidence_identity.DYNAMIC_FAMILIES.
 DYNAMIC_FAMILIES = ('obench/adapters', 'obench/harbor_agents', 'obench/repair_oracles')
-# Directories the lane's scripts prepend to sys.path for bare imports.
-SCRIPT_PATHS = ('scripts/ci', 'scripts/local')
 PATH_TOKEN = re.compile(r'[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+')
 MODULE_TOKEN = re.compile(r'\bobench(?:\.[A-Za-z_]\w*)+')
 NAME_TOKEN = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.-]*')
 SHA = re.compile(r'[0-9a-f]{40}')
-OTHER_LANE_ONLY = re.compile(r"""^\$?\{?\{?\s*matrix\.lane\s*==\s*'([A-Za-z0-9_-]+)'\s*\}?\}?$""")
+LANE_EQUALITY = re.compile(r"""matrix\.lane\s*==\s*(['"])([A-Za-z0-9_-]+)\1""")
+LANE_PREFIX = re.compile(r"""startsWith\(\s*matrix\.lane\s*,\s*(['"])([A-Za-z0-9_-]+)\1\s*\)""")
 
 
 class Tree:
@@ -91,8 +73,10 @@ def git(repo, *args):
                           text=True).stdout
 
 
-def lane_steps(text):
+def lane_steps(text, lane=LANE):
     """Return (text, lane_specific) for each integration step the lane can run."""
+    if lane not in LANES:
+        raise ValueError(f'unknown Harbor lane: {lane!r}')
     lines = text.splitlines()
     try:
         start = lines.index('jobs:')
@@ -118,15 +102,19 @@ def lane_steps(text):
     for step in steps:
         conditions = [re.sub(r'^\s*-?\s*if:\s*', '', line).strip() for line in step
                       if re.match(r'^      (- |  )if:', line)]
-        match = OTHER_LANE_ONLY.match(conditions[0]) if len(conditions) == 1 else None
-        if match and match[1] != LANE:
+        condition = conditions[0] if len(conditions) == 1 else ''
+        if condition.startswith('${{') and condition.endswith('}}'):
+            condition = condition[3:-2].strip()
+        match = LANE_EQUALITY.fullmatch(condition)
+        prefix = LANE_PREFIX.fullmatch(condition)
+        if (match and match[2] != lane) or (prefix and not lane.startswith(prefix[2])):
             continue
         specific += bool(match)
         applicable.append(('\n'.join(step), bool(match)))
     # Without a step conditioned exactly on this lane, the job layout is not
     # the one this parser understands (or predates the lane): fail closed.
     if not specific:
-        raise ValueError(f"no {JOB} step is conditioned on matrix.lane == '{LANE}'")
+        raise ValueError(f"no {JOB} step is conditioned on matrix.lane == '{lane}'")
     return applicable
 
 
@@ -139,10 +127,106 @@ def modules_of(tree):
     return modules
 
 
-def inputs(tree):
+def script_search_paths(source, path, tree):
+    """Resolve script sys.path mutations without treating roots as runtime data.
+
+    Recognize only static repository paths. Anything dynamic in an entry/helper
+    script raises: silently dropping its import root could produce an unsafe skip.
+    Package runtime loaders retain their existing conservative path handling.
+    """
+    if not path.startswith('scripts/'):
+        return set(), set()
+    anchor = PurePosixPath('/repository')
+    bindings = {'__file__': anchor / path}
+
+    def resolve(node):
+        if isinstance(node, ast.Name):
+            return bindings[node.id]
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return PurePosixPath(node.value)
+        if isinstance(node, ast.Call) and not node.keywords:
+            if isinstance(node.func, ast.Name) and node.func.id in ('Path', 'str') and len(node.args) == 1:
+                return resolve(node.args[0])
+            if isinstance(node.func, ast.Attribute) and node.func.attr in ('resolve', 'absolute') and not node.args:
+                return resolve(node.func.value)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            return resolve(node.left) / resolve(node.right)
+        if isinstance(node, ast.Attribute) and node.attr == 'parent':
+            return resolve(node.value).parent
+        if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+                and node.value.attr == 'parents' and isinstance(node.slice, ast.Constant)
+                and type(node.slice.value) is int):
+            return resolve(node.value.value).parents[node.slice.value]
+        raise ValueError('dynamic path expression')
+
+    stores, parameters = {}, set()
+    for node in ast.walk(source):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores[node.id] = stores.get(node.id, 0) + 1
+        elif isinstance(node, ast.arg):
+            parameters.add(node.arg)
+
+    # Roots normally use ROOT/REPO = Path(__file__).resolve().parents[2].
+    for node in source.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    if stores.get(target.id) != 1 or target.id in parameters:
+                        bindings.pop(target.id, None)
+                        continue
+                    try:
+                        bindings[target.id] = resolve(node.value)
+                    except (KeyError, ValueError, IndexError, TypeError):
+                        bindings.pop(target.id, None)
+
+    def is_sys_path(node):
+        return (isinstance(node, ast.Attribute) and node.attr == 'path'
+                and isinstance(node.value, ast.Name) and node.value.id == 'sys')
+
+    roots, ignored = set(), set()
+    for node in ast.walk(source):
+        values = None
+        if isinstance(node, ast.Assign) and any(
+                is_sys_path(t.value) if isinstance(t, ast.Subscript) else is_sys_path(t)
+                for t in node.targets):
+            values = node.value.elts if isinstance(node.value, (ast.List, ast.Tuple)) else [node.value]
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and is_sys_path(node.func.value):
+            if node.func.attr == 'insert' and len(node.args) == 2 and not node.keywords:
+                values = [node.args[1]]
+            elif node.func.attr == 'append' and len(node.args) == 1 and not node.keywords:
+                values = node.args
+            elif (node.func.attr == 'extend' and len(node.args) == 1 and not node.keywords
+                  and isinstance(node.args[0], (ast.List, ast.Tuple))):
+                values = node.args[0].elts
+            else:
+                raise ValueError(f'{path}: unrecognized sys.path operation')
+        if isinstance(node, ast.AugAssign) and is_sys_path(node.target):
+            if isinstance(node.op, ast.Add) and isinstance(node.value, (ast.List, ast.Tuple)):
+                values = node.value.elts
+            else:
+                raise ValueError(f'{path}: unrecognized sys.path operation')
+        if values is None:
+            continue
+        for value in values:
+            try:
+                root = resolve(value)
+                root = root.relative_to(anchor) if root.is_absolute() else root
+                if '..' in root.parts or (str(root) != '.' and str(root) not in tree.dirs):
+                    raise ValueError('not a tracked repository directory')
+            except (KeyError, ValueError, IndexError, TypeError) as error:
+                raise ValueError(f'{path}: cannot resolve sys.path search root') from error
+            roots.add(str(root))
+            ignored.update(id(n) for n in ast.walk(value)
+                           if isinstance(n, ast.Constant) and isinstance(n.value, str))
+    return roots, ignored
+
+
+def inputs(tree, lane=LANE):
     """Return (files, directories) the lane reads at this commit."""
+    if lane not in LANES:
+        raise ValueError(f'unknown Harbor lane: {lane!r}')
     modules = modules_of(tree)
-    files, directories, pending = {WORKFLOW, CLASSIFIER}, set(), []
+    files, directories, pending = {WORKFLOW, CLASSIFIER, DRIVER}, set(), []
     if WORKFLOW not in tree.files:
         raise ValueError(f'{WORKFLOW} is missing at {tree.rev}')
     # Files a module can open by bare name: its siblings, and package data.
@@ -155,16 +239,14 @@ def inputs(tree):
 
     def add_path(token):
         path = token.removeprefix('./').rstrip('/')
-        if '/' not in path:
-            # A bare top-level name ('./docs' in help text) is too coarse to
-            # identify an input; single-segment literals are ignored alike.
-            return
         if path in tree.files:
             if path not in files:
                 files.add(path)
                 if path.endswith('.py'):
                     pending.append(path)
-        elif path in tree.dirs:
+        elif '/' in path and path in tree.dirs:
+            # Single-segment directory literals are too coarse (e.g. './docs'
+            # in help text); concrete files and resolved imports remain valid.
             directories.add(path)
 
     def add_module(name):
@@ -191,13 +273,19 @@ def inputs(tree):
             for path in (*siblings.get((here, token), ()), *package_data.get(token, ())):
                 add_path(path)
 
-    for step, specific in lane_steps(tree.read(WORKFLOW)):
+    for step, specific in lane_steps(tree.read(WORKFLOW), lane=lane):
         if specific and not any(token.removeprefix('./').rstrip('/') in tree.files | tree.dirs
-                                for token in PATH_TOKEN.findall(step)):
+                                for token in PATH_TOKEN.findall(step)) and not any(
+                '.'.join(name.split('.')[:count]) in modules
+                for name in MODULE_TOKEN.findall(step) for count in range(1, len(name.split('.'))+1)):
             # A lane step naming no repository path means paths no longer
             # resolve from the repository root (or the step changed shape).
-            raise ValueError(f'a {LANE} step names no repository path: {step.splitlines()[0]}')
+            raise ValueError(f'a {lane} step names no repository path: {step.splitlines()[0]}')
         add_text(step, '.')
+    # Imports in a helper inherit its entry script's sys.path. Union roots
+    # conservatively across lane scripts and revisit sources when a newly read
+    # script adds a root; traversal order must not drop a package dependency.
+    search_roots = {'.', *(str(PurePosixPath(p).parent) for p in pending)}
     seen = set()
     while pending:
         path = pending.pop()
@@ -205,6 +293,11 @@ def inputs(tree):
             continue
         seen.add(path)
         tree_ = ast.parse(tree.read(path), filename=path)
+        search_paths, search_constants = script_search_paths(tree_, path, tree)
+        if not search_paths <= search_roots:
+            search_roots |= search_paths
+            pending.extend(seen - {path})
+            seen = {path}
         # Relative imports resolve against the containing package.
         package = '.'.join(PurePosixPath(path).parent.parts) if path.startswith('obench/') else ''
         for node in ast.walk(tree_):
@@ -213,7 +306,22 @@ def inputs(tree):
             elif isinstance(node, ast.ImportFrom):
                 if node.level:
                     if not package:
-                        raise ValueError(f'{path}: relative import outside a package')
+                        base = PurePosixPath(path).parent
+                        for _ in range(node.level):
+                            if str(base / '__init__.py') not in tree.files:
+                                raise ValueError(f'{path}: relative import outside a known package')
+                            base = base.parent
+                        base = PurePosixPath(path).parent
+                        for _ in range(node.level-1):
+                            base = base.parent
+                        target = base.joinpath(*(node.module or '').split('.'))
+                        add_path(str(target) + '.py')
+                        add_path(str(target / '__init__.py'))
+                        for alias in node.names:
+                            child = target.joinpath(*alias.name.split('.'))
+                            add_path(str(child) + '.py')
+                            add_path(str(child / '__init__.py'))
+                        continue
                     parts = package.split('.')
                     base = '.'.join(parts[:len(parts)-node.level+1])
                     module = '.'.join(filter(None, (base, node.module)))
@@ -221,15 +329,19 @@ def inputs(tree):
                     module = node.module or ''
                 names = [module, *(module + '.' + alias.name for alias in node.names)]
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                add_text(node.value, str(PurePosixPath(path).parent))
+                if id(node) not in search_constants:
+                    add_text(node.value, str(PurePosixPath(path).parent))
                 continue
             else:
                 continue
             for name in names:
                 add_module(name)
-                top = name.split('.')[0]
-                for directory in (str(PurePosixPath(path).parent), *SCRIPT_PATHS):
-                    add_path(f'{directory}/{top}.py')
+                for directory in (str(PurePosixPath(path).parent), *sorted(search_roots)):
+                    parts = name.split('.')
+                    for count in range(1, len(parts)+1):
+                        candidate = str(PurePosixPath(directory).joinpath(*parts[:count]))
+                        add_path(f'{candidate}.py')
+                        add_path(f'{candidate}/__init__.py')
     return files, directories
 
 
@@ -237,24 +349,36 @@ def matches(path, files, directories):
     return path in files or any(path.startswith(d + '/') for d in directories)
 
 
-def decide(repo, base, head, merged=None):
-    report = {'base': base, 'head': head, 'merged': merged}
+def decide(repo, base, head, merged=None, lane=LANE, comparison='pull_request'):
+    if lane not in LANES:
+        raise ValueError(f'unknown Harbor lane: {lane!r}')
+    if comparison not in ('pull_request', 'push'):
+        raise ValueError(f'unknown comparison: {comparison!r}')
+    if comparison == 'push' and merged is not None:
+        raise ValueError('a push comparison cannot include a tested merge revision')
+    report = {'base': base, 'head': head, 'merged': merged, 'lane': lane,
+              'comparison': comparison}
     revisions = (('base', base), ('head', head), *((('merged', merged),) if merged is not None else ()))
     for label, value in revisions:
         if not SHA.fullmatch(value or ''):
             raise ValueError(f'{label} is not a full commit SHA: {value!r}')
     if git(repo, 'rev-parse', '--is-shallow-repository').strip() != 'false':
         raise ValueError('shallow history cannot establish the merge base')
-    merge_base = git(repo, 'merge-base', base, head).strip()
-    report['merge_base'] = merge_base
+    if comparison == 'pull_request':
+        merge_base = git(repo, 'merge-base', base, head).strip()
+        report['merge_base'] = merge_base
+        revisions_to_read = (merge_base, base, head, *([merged] if merged else []))
+    else:
+        merge_base = base  # Exact before..after, including a force-push rollback.
+        revisions_to_read = (base, head)
     changed = sorted(p for p in git(repo, 'diff', '--name-only', '-z', '--no-renames',
                                     merge_base, head).split('\0') if p)
     report['changed'] = changed
     if not changed:
         raise ValueError('the comparison found no changed files')
     files, directories = set(), set()
-    for rev in dict.fromkeys((merge_base, base, head, *([merged] if merged else []))):
-        rev_files, rev_directories = inputs(Tree(repo, rev))
+    for rev in dict.fromkeys(revisions_to_read):
+        rev_files, rev_directories = inputs(Tree(repo, rev), lane=lane)
         files |= rev_files
         directories |= rev_directories
     report['input_files'] = len(files)
@@ -262,12 +386,14 @@ def decide(repo, base, head, merged=None):
     report['matched'] = [p for p in changed if matches(p, files, directories)]
     report['run'] = bool(report['matched'])
     report['reason'] = ('changed lane inputs' if report['run'] else
-                        'no changed file is a browser-quality input')
+                        f'no changed file is a {lane} input')
     return report
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    parser.add_argument('--lane', choices=LANES, default=LANE)
+    parser.add_argument('--comparison', choices=('pull_request', 'push'), default='pull_request')
     parser.add_argument('--repo', default='.', help='Git repository (default: current directory)')
     parser.add_argument('--base', help='Base commit SHA of the pull request')
     parser.add_argument('--head', help='Head commit SHA of the pull request')
@@ -278,11 +404,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.list is not None:
         tree = Tree(args.repo, args.list) if args.list else WorkTree(args.repo)
-        files, directories = inputs(tree)
+        files, directories = inputs(tree, lane=args.lane)
         print(json.dumps({'files': sorted(files), 'directories': sorted(directories)}, indent=2))
         return 0
     try:
-        report = decide(args.repo, args.base, args.head, args.merged)
+        report = decide(args.repo, args.base, args.head, args.merged,
+                        lane=args.lane, comparison=args.comparison)
     except Exception as error:  # Fail closed: any doubt runs the lane.
         report = {'base': args.base, 'head': args.head, 'merged': args.merged, 'run': True,
                   'reason': f'fail-closed: {type(error).__name__}: {error}'}

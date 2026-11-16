@@ -1,4 +1,4 @@
-"""The browser-quality CI classifier derives inputs from source and fails closed."""
+"""Harbor lane classification derives inputs from source and fails closed."""
 import importlib.util
 import io
 import os
@@ -30,6 +30,15 @@ jobs:
       - name: Other lane only
         if: matrix.lane == 'repair-grading'
         run: python3 scripts/local/other.py
+      - name: Repair tools
+        if: matrix.lane == 'repair-tools'
+        run: python3 scripts/local/tools.py
+      - name: Concurrency
+        if: matrix.lane == 'concurrency'
+        run: python3 scripts/local/concurrency.py
+      - name: Browser
+        if: matrix.lane == 'browser'
+        run: python3 scripts/local/browser.py
       - name: Browser variants
         if: startsWith(matrix.lane, 'browser')
         run: python3 scripts/local/build.py
@@ -49,10 +58,17 @@ FILES = {
     'scripts/ci/browser_quality_inputs.py': '# classifier\n',
     'scripts/ci/classify_only.py': '',
     'scripts/ci/fixtures.py': 'import json\n',
+    'scripts/ci/unit_tests.py': '# unrelated CI runner\n',
     'scripts/local/other.py': 'import obench.unrelated\n',
     'scripts/local/gate_only.py': '',
+    'scripts/local/tools.py': '',
+    'scripts/local/concurrency.py': '',
+    'scripts/local/browser.py': '',
     'scripts/local/build.py': "CONTEXT = 'docker/runtime'\n",
-    'scripts/local/entry.py': ('import sys\nfrom fixtures import prepare\nfrom obench import a\n'
+    'scripts/local/entry.py': ('import sys\nfrom pathlib import Path\n'
+                               "ROOT = Path(__file__).resolve().parents[2]\n"
+                               "sys.path[:0] = [str(ROOT), str(ROOT / 'scripts/ci')]\n"
+                               'from fixtures import prepare\nfrom obench import a\n'
                                'from obench.repair_oracles import registry\n'),
     'deps/lock.txt': 'harbor==1\n',
     'docker/runtime/Dockerfile': 'FROM scratch\n',
@@ -130,6 +146,123 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(report['matched'], [])
         self.assertEqual(report['changed'], sorted(files))
 
+    def test_each_lane_uses_its_steps_and_shared_runtime(self):
+        tree = bqi.WorkTree(str(self.repo.path))
+        entries = {'repair-grading': 'other', 'repair-tools': 'tools',
+                   'concurrency': 'concurrency', 'browser': 'browser',
+                   'browser-quality': 'entry'}
+        for lane, own in entries.items():
+            with self.subTest(lane=lane):
+                files, directories = bqi.inputs(tree, lane=lane)
+                self.assertIn(f'scripts/local/{own}.py', files)
+                self.assertIn('deps/lock.txt', files)
+                self.assertIn('scripts/ci/harbor_ci.py', files)
+                self.assertEqual('scripts/local/build.py' in files, lane.startswith('browser'))
+                for other in set(entries.values()) - {own}:
+                    self.assertNotIn(f'scripts/local/{other}.py', files)
+                self.assertFalse(bqi.matches('scripts/ci/unit_tests.py', files, directories))
+
+    def test_unknown_step_condition_keeps_its_inputs(self):
+        # A recognized equality within a larger expression cannot exclude the
+        # step: the rest of the expression could select this lane too.
+        unknown = WORKFLOW.replace("if: matrix.lane == 'repair-grading'",
+                                   "if: matrix.lane == 'repair-grading' || success()")
+        self.repo.write({bqi.WORKFLOW: unknown})
+        files, _ = bqi.inputs(bqi.WorkTree(str(self.repo.path)))
+        self.assertIn('scripts/local/other.py', files)
+
+    def test_expression_wrappers_and_double_quoted_lane_names(self):
+        workflow = WORKFLOW.replace("if: matrix.lane == 'repair-grading'",
+                                    'if: ${{ matrix.lane == "repair-grading" }}')
+        workflow = workflow.replace("if: startsWith(matrix.lane, 'browser')",
+                                    'if: ${{ startsWith(matrix.lane, "browser") }}')
+        self.repo.write({bqi.WORKFLOW: workflow})
+        files, _ = bqi.inputs(bqi.WorkTree(str(self.repo.path)), lane='repair-grading')
+        self.assertIn('scripts/local/other.py', files)
+        self.assertNotIn('scripts/local/build.py', files)
+
+    def test_imports_resolve_a_new_static_search_root_and_package(self):
+        self.repo.write({'scripts/local/entry.py': FILES['scripts/local/entry.py'] +
+                         "sys.path.insert(0, str(ROOT / 'scripts/helpers'))\n"
+                         'from fixture_package import controls\n',
+                         'scripts/helpers/fixture_package/__init__.py': '',
+                         'scripts/helpers/fixture_package/controls.py': 'from . import sibling\nfrom fixture_package import absolute_sibling\n',
+                         'scripts/helpers/fixture_package/sibling.py': '# relative dependency\n',
+                         'scripts/helpers/fixture_package/absolute_sibling.py': '# absolute dependency\n',
+                         'scripts/helpers/unrelated.py': '# unused\n'})
+        files, directories = bqi.inputs(bqi.WorkTree(str(self.repo.path)))
+        self.assertIn('scripts/helpers/fixture_package/__init__.py', files)
+        self.assertIn('scripts/helpers/fixture_package/controls.py', files)
+        self.assertIn('scripts/helpers/fixture_package/sibling.py', files)
+        self.assertIn('scripts/helpers/fixture_package/absolute_sibling.py', files)
+        self.assertFalse(bqi.matches('scripts/helpers/unrelated.py', files, directories))
+
+    def test_import_search_directory_does_not_include_every_sibling(self):
+        self.assertSkips(['scripts/ci/unit_tests.py'])
+        self.assertRuns(['scripts/ci/fixtures.py'], matched=['scripts/ci/fixtures.py'])
+
+    def test_same_directory_used_at_runtime_is_still_a_full_input(self):
+        self.repo.write({'scripts/local/entry.py': FILES['scripts/local/entry.py'] +
+                         "RUNTIME = 'scripts/ci'\n"})
+        self.repo.base = self.repo.commit('runtime directory')
+        self.assertRuns(['scripts/ci/unit_tests.py'], matched=['scripts/ci/unit_tests.py'])
+
+    def test_unknown_script_import_search_root_fails_closed(self):
+        self.repo.write({'scripts/local/entry.py': FILES['scripts/local/entry.py'] +
+                         'sys.path.insert(0, choose_root())\n'})
+        self.repo.base = self.repo.commit('dynamic import root')
+        with self.assertRaisesRegex(ValueError, 'sys.path'):
+            self.repo.decide(self.repo.change(['obench/unrelated.py']))
+
+    def test_ambiguous_script_import_search_root_fails_closed(self):
+        self.repo.write({'scripts/local/entry.py': FILES['scripts/local/entry.py'] +
+                         "ROOT = choose_root()\n"})
+        self.repo.base = self.repo.commit('rebound import root')
+        with self.assertRaisesRegex(ValueError, 'sys.path'):
+            self.repo.decide(self.repo.change(['obench/unrelated.py']))
+
+    def test_dotted_repository_script_import_is_followed(self):
+        self.repo.write({'scripts/local/entry.py': FILES['scripts/local/entry.py'] +
+                         'from scripts.ci import dotted_fixture\n',
+                         'scripts/ci/dotted_fixture.py': '# imported package member\n'})
+        files, _ = bqi.inputs(bqi.WorkTree(str(self.repo.path)))
+        self.assertIn('scripts/ci/dotted_fixture.py', files)
+
+    def test_lane_equality_and_browser_prefix_are_selected(self):
+        tree = bqi.WorkTree(str(self.repo.path))
+        files, directories = bqi.inputs(tree, lane='repair-grading')
+        self.assertIn('scripts/local/other.py', files)
+        self.assertNotIn('scripts/local/build.py', files)
+        self.assertNotIn('scripts/local/entry.py', files)
+
+    def test_unknown_lane_or_comparison_is_rejected(self):
+        head = self.repo.change(['obench/unrelated.py'])
+        for kwargs in ({'lane': 'missing'}, {'comparison': 'unknown'}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                bqi.decide(str(self.repo.path), self.repo.base, head, **kwargs)
+
+    def test_push_compares_exact_endpoints_instead_of_merge_base(self):
+        # A force-push rolls back b.py on the old branch; the new branch itself
+        # changes only prose relative to their common ancestor.
+        self.repo.write({'obench/b.py': '# old branch input change\n'})
+        before = self.repo.commit('old branch')
+        after = self.repo.change(['docs/guide.md'])
+        report = bqi.decide(str(self.repo.path), before, after, comparison='push')
+        self.assertTrue(report['run'], report)
+        self.assertEqual(report['matched'], ['obench/b.py'])
+        self.assertEqual(report['changed'], ['docs/guide.md', 'obench/b.py'])
+
+    def test_push_unions_both_endpoint_closures(self):
+        # The new endpoint stops importing b.py. Changing b.py must still match
+        # the closure that was used at the old endpoint.
+        self.repo.write({'obench/a.py': 'import obench.inline\n',
+                         'obench/b.py': '# changed while removing import\n'})
+        head = self.repo.commit('remove dependency')
+        report = bqi.decide(str(self.repo.path), self.repo.base, head, comparison='push')
+        self.assertEqual(report['matched'], ['obench/a.py', 'obench/b.py'])
+        with self.assertRaisesRegex(ValueError, 'tested merge'):
+            bqi.decide(str(self.repo.path), self.repo.base, head, head, comparison='push')
+
     def test_changes_outside_the_closure_skip(self):
         self.assertSkips(['obench/unrelated.py', 'docs/guide.md', 'docker/unused/Dockerfile',
                           'tasks/other/task.toml', 'scripts/local/other.py',
@@ -200,18 +333,20 @@ class ClassifierTests(unittest.TestCase):
 
     def test_invalid_comparisons_fail_closed(self):
         head = self.repo.change(['obench/unrelated.py'])
-        for base, head_ in ((self.repo.base[:12], head), ('0' * 40, head), (self.repo.base, None),
-                            (self.repo.base, self.repo.base)):
-            with self.subTest(base=base, head=head_), self.assertRaises(Exception):
-                bqi.decide(str(self.repo.path), base, head_)
+        for comparison in ('pull_request', 'push'):
+            for base, head_ in ((self.repo.base[:12], head), ('0' * 40, head), (self.repo.base, None),
+                                (self.repo.base, self.repo.base)):
+                with self.subTest(base=base, head=head_, comparison=comparison), self.assertRaises(Exception):
+                    bqi.decide(str(self.repo.path), base, head_, comparison=comparison)
 
     def test_shallow_history_fails_closed(self):
         head = self.repo.change(['obench/unrelated.py'])
         with tempfile.TemporaryDirectory() as clone:
             subprocess.run(['git', 'clone', '-q', '--depth', '1', '--branch', 'topic',
                             self.repo.path.as_uri(), clone], check=True, capture_output=True)
-            with self.assertRaisesRegex(ValueError, 'shallow'):
-                bqi.decide(clone, self.repo.base, head)
+            for comparison in ('pull_request', 'push'):
+                with self.subTest(comparison=comparison), self.assertRaisesRegex(ValueError, 'shallow'):
+                    bqi.decide(clone, self.repo.base, head, comparison=comparison)
 
     def test_cli_prints_skip_last_and_runs_on_any_error(self):
         head = self.repo.change(['obench/unrelated.py'])
@@ -229,7 +364,7 @@ class ClassifierTests(unittest.TestCase):
 
 
 class RealWorkflowTests(unittest.TestCase):
-    """Known positives and negatives on this checkout's actual lane."""
+    """Known positives and negatives on this checkout's actual lanes."""
 
     @classmethod
     def setUpClass(cls):
@@ -237,10 +372,40 @@ class RealWorkflowTests(unittest.TestCase):
             tree = bqi.WorkTree(str(ROOT))
         except (OSError, subprocess.CalledProcessError) as error:
             raise unittest.SkipTest(f'needs a Git checkout: {error}')
-        cls.files, cls.directories = bqi.inputs(tree)
+        cls.closures = {lane: bqi.inputs(tree, lane=lane) for lane in bqi.LANES}
+        cls.files, cls.directories = cls.closures[bqi.LANE]
 
     def covered(self, path):
         return bqi.matches(path, self.files, self.directories)
+
+    def test_all_lanes_cover_their_real_entry_and_runtime_inputs(self):
+        entries = {
+            'repair-grading': ('scripts/local/verify_repair_trajectory.py',
+                               'scripts/ci/repair_quality_fixtures.py',
+                               'obench/tests/test_sandbox_grading.py'),
+            'repair-tools': ('scripts/local/verify_repair_developer.py',
+                             'scripts/local/verify_frozen_context.py'),
+            'concurrency': ('scripts/local/verify_am123_oracle.py',
+                            'experiments/repair_cases/am123/current-schema.json'),
+            'browser': ('scripts/local/verify_parallel_sandbox.py',
+                        'obench/tests/test_browser_review.py',
+                        'scripts/ci/browser_quality_fixtures.py'),
+            'browser-quality': ('scripts/local/verify_browser_quality.py',
+                                'scripts/ci/browser_quality_fixtures.py'),
+        }
+        shared = (bqi.WORKFLOW, bqi.CLASSIFIER, bqi.DRIVER,
+                  '.github/requirements/harbor.txt', '.github/requirements/harbor-build.txt',
+                  'scripts/local/build_repair_runtime.py', 'docker/repair-sandbox/Dockerfile',
+                  'docker/repair-sandbox/python/requirements.txt',
+                  'docker/repair-sandbox/trust/blocked-root.pem', 'obench/sandbox_gateway.py')
+        for lane, (files, directories) in self.closures.items():
+            with self.subTest(lane=lane):
+                self.assertEqual([p for p in (*shared, *entries[lane])
+                                  if not bqi.matches(p, files, directories)], [])
+                self.assertFalse(bqi.matches('scripts/ci/unit_tests.py', files, directories))
+                self.assertFalse(bqi.matches('scripts/ci/check_locks.py', files, directories))
+                self.assertEqual(bqi.matches('docker/browser-runtime/Dockerfile', files, directories),
+                                 lane.startswith('browser'))
 
     def test_lane_inputs_are_covered(self):
         graders = ['package_campaign', 'evaluation_package', 'repair_validation', 'sandbox_grading',
@@ -262,7 +427,7 @@ class RealWorkflowTests(unittest.TestCase):
 
     def test_other_lane_and_reporting_sources_are_not(self):
         for path in ('obench/report.py', 'obench/cli.py', 'obench/browser_review.py',
-                     'scripts/local/verify_browser_lifecycle.py', 'docs/project/CI.md',
+                     'scripts/local/verify_browser_lifecycle.py', 'scripts/ci/unit_tests.py', 'docs/project/CI.md',
                      'benchmarks/harbor/local/dojo-evidence-pr60-v5/task.toml'):
             with self.subTest(path=path):
                 self.assertFalse(self.covered(path))

@@ -12,7 +12,8 @@ explicit run against an exact commit and immutable runtime.
 | Publication Hygiene | Tracked public content and detector controls |
 | Workflow Security Audit | Pinned zizmor audit and dependency-lock drift |
 | Community submissions | Reverification of changed published bundles |
-| CLI version check | Advisory compatibility-image update issues; never upgrades a frozen runtime or host |
+| CLI version check | Compatibility-image update summary/artifact, plus an issue when enabled; never upgrades a frozen runtime or host |
+| CodeQL | Maintained Python, JavaScript/TypeScript and Actions; frozen payload exclusions are explicit in `.github/codeql/codeql-config.yml` |
 
 Keep the existing `test (3.11)`, `test (3.13)`, and `check` job names stable when
 changing workflows. If required-check configuration is introduced or changed,
@@ -27,8 +28,9 @@ import and package admission) and `browser-quality` (screenshot transport, then
 the browser controls that consume its receipt). Each installs the same frozen
 graph, builds its own runtime, preserves all existing checks, and verifies
 cleanup. The `sandbox` aggregate remains the gate and succeeds only when every
-selected lane succeeds; a failed, cancelled, or skipped matrix cannot pass it.
-Pull requests may deselect `browser-quality` (see below). Summaries use
+selected lane succeeds. A failed, cancelled, or unexpectedly skipped matrix
+cannot pass it. All lanes may be deliberately deselected after a complete
+comparison (see below). Summaries use
 lane-specific artifact names. Each lane has a 20-minute bound, with a five-minute
 `classify` job ahead of the lanes and a two-minute aggregate job.
 
@@ -44,67 +46,85 @@ needs a separate build, export and upload before any lane starts, whereas the
 two-minute cold builds already overlap across runners.
 Grading and fresh admission replay still run uncached.
 
-Pull requests that change only `docs/`, root prose files (`README.md`,
-`CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`,
-`LICENSE`) or GitHub issue/PR templates skip Harbor integration; none of its
-checks read those paths. Pushes to `main` always run it. CI is not filtered,
-because unit tests read published site data under `docs/`. Branch protection
-does not currently require any check. If `sandbox` becomes required, replace the
-workflow-level filter with an in-workflow change detector: a skipped workflow
-leaves a required check pending.
+### Select lanes from their actual inputs
 
-### browser-quality runs only when its inputs change
+Every PR and `main` push runs a cheap `classify` job. Each of the five lanes is
+selected only when one of its derived inputs changed. Prose-only changes can
+skip all expensive lanes while still producing the `sandbox` gate; ordinary
+unit CI remains unfiltered because its tests read published data under `docs/`.
+Manual dispatch always forces all five lanes.
 
-On pull requests, a `classify` job runs before the lanes and drops
-`browser-quality` from the matrix when no changed file is one of its inputs. The
-other four lanes always run. Pushes to `main`, manual dispatches and every other
-event always include `browser-quality`. When it is skipped, `repair-tools`
-(about 8 minutes) becomes the critical path.
+`scripts/ci/browser_quality_inputs.py` derives each lane's inputs from source:
 
-`scripts/ci/browser_quality_inputs.py` derives the inputs from source each time;
-there is no file list to maintain:
+- Applicable workflow steps contribute entry scripts, tasks and dependency locks.
+  Exact lane equality and `startsWith(matrix.lane, 'browser')` conditions are
+  understood; unfamiliar conditions conservatively contribute their inputs.
+- Python imports, literal `obench.*` module names and dynamically loaded adapter,
+  Harbor-agent and oracle families contribute their source closure.
+- Literal runtime directories, task files, Docker build contexts, sibling files
+  and package data remain inputs. A statically resolved `sys.path` search root
+  contributes its actual imported modules, rather than treating every unrelated
+  script in that directory as consumed data. A runtime use of the same directory
+  still contributes the whole tree; unresolvable script search roots fail closed.
+- The workflow, classifier and `scripts/ci/harbor_ci.py` driver always select every
+  lane. Shared runtime and dependency-lock changes likewise select their consumers.
 
-- every integration step the lane can run, which is any step not conditioned
-  exactly on `matrix.lane == '<another lane>'`, contributes the repository
-  paths it names: entry scripts, the activity-explorer task and the Harbor
-  dependency locks;
-- Python files are followed through their imports, with the same AST approach
-  as `obench/evidence_identity.py`. Literal `obench.*` names count; reaching the
-  adapter, Harbor-agent or oracle package includes every member. Bare imports
-  resolve to `scripts/ci` and `scripts/local`;
-- string literals in that closure add the tracked paths they name (runtime build
-  contexts under `docker/`, Dockerfiles, package locks, task directories), files
-  beside the module, and non-Python files under `obench/`;
-- the workflow and the classifier are always inputs.
-
-The input set is the union for the merge base, the current base, the PR head
-and the merge commit the run tests. Deleting an input, or a dependency the base
-branch gained after the PR branched, still runs the lane. It is deliberately coarse: an unused import or a path
-in help text can make the lane run, never skip. The closure currently holds
-about 114 files plus directories such as `obench/repair_oracles/` and
-`docker/browser-runtime/`. Print it with:
+PR comparisons use the merge-base-to-head diff and union the input closures from
+merge base, current base, head and tested merge revision. Push comparisons use
+exact before-to-after changes and both endpoint closures, including force-push
+rollbacks. Deleted inputs and dependencies introduced on an advancing base remain
+covered. This is deliberately conservative, not a general Python dependency proof.
 
 ```sh
-python3 scripts/ci/browser_quality_inputs.py --list        # working tree
-python3 scripts/ci/browser_quality_inputs.py --base BASE_SHA --head HEAD_SHA
+python3 scripts/ci/browser_quality_inputs.py --lane repair-tools --list
+python3 scripts/ci/harbor_ci.py classify --event push --base BEFORE_SHA --head AFTER_SHA
 ```
 
-The classifier fails closed. A non-SHA or unknown revision, shallow history, an
-empty comparison, an unparseable source, or a workflow layout it does not
-recognize (no step conditioned on `browser-quality`, or a lane step naming no
-repository path) all select running the lane. The job's step summary records
-the decision and its log holds the JSON report: changed files and matched
-inputs. The `sandbox` gate accepts a missing `browser-quality` lane only when
-`classify` succeeded and chose the skip for a pull request. To force the lane,
-run the workflow manually (`gh workflow run harbor-integration.yml --ref
-BRANCH`) or change one of its inputs. The decision is computed from pull request
-code, as the workflow itself is; it is a cost control, not a trust boundary.
+Unknown revisions, shallow history, empty comparisons, parse errors or unfamiliar
+workflow layouts run all lanes. A partial classification never becomes a partial
+matrix. The job summary lists run/skip decisions; its log retains changed and
+matched paths. The `sandbox` gate checks the complete decision against the actual
+matrix result: no selected lanes requires a skipped integration job; any selected
+lanes require success. Failed classification, malformed decisions, cancellation
+or unexpected skips fail the gate. Selection runs from PR code, like the workflow
+itself; it is a cost control, not a trust boundary.
 
 The integration lane does not establish model accuracy or authenticated provider
 connectivity. Hosted Linux coverage complements local Docker-on-macOS checks.
 The browser lane also tests frozen evaluation-package replay and solver export
 boundaries with synthetic public fixtures. It neither accesses private scored
 packages nor grants their campaign admission.
+
+## Security scan scope
+
+The advanced CodeQL workflow scans Python, JavaScript/TypeScript and Actions on
+PRs, `main`, a weekly schedule and manual dispatch, using the default security
+queries. Its linked CLI/query bundle follows the pinned action release. The
+config excludes frozen task workspaces, solutions, application snapshots and
+copied upstream payloads; benchmark verifiers, score-authority code and maintained
+experiment tools stay in scope. Keep new maintained languages in the matrix.
+The isolated Go behavioral test under `engram-batch-pr1/checker_data/` is a fixed
+fixture, not a maintained Go application; no Go build/analysis lane is provisioned.
+
+GitHub default setup must be disabled for advanced SARIF uploads to succeed.
+When changing setup, retain the old settings until all language uploads pass,
+then verify a new `main` baseline and actual scanned-file coverage. Restore default
+setup if the replacement cannot upload. Do not dismiss existing alerts merely
+because the configuration changed. See `.github/codeql/codeql-config.yml` and
+`test_codeql_scope.py` for the exclusion contract. Each hosted language job
+also checks its finalized database source archive with
+`scripts/ci/verify_codeql_scope.py`: maintained-source positives must be present
+and frozen-snapshot controls absent. Counts and control outcomes are retained in
+the job summary; database contents are neither extracted nor uploaded.
+
+## Weekly CLI advisory
+
+The version check always retains its report in the job summary and a 14-day
+artifact. When updates exist and repository Issues are enabled, it also creates
+or updates the marked advisory issue. Disabled Issues is a successful summary-only
+route; repository/API errors remain failures with the report retained. A clean
+comparison sends no GitHub request. Registry lookup warnings remain visible as
+incomplete coverage. This advisory never upgrades pins, images or host tools.
 
 ## Unit tests run one module per process
 
