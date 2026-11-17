@@ -234,14 +234,14 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
 - Do not abandon the stdlib-only, files-plus-shell-checker task contract; it is
   the accessibility edge.
 
-## Working conventions for agents
+## Working Agreement
 
-- The checker is the sole judge of success; never trust harness self-reports.
-- Every new task must pass `obench validate` polarity (fails untouched,
-  passes with `solution/` overlaid).
 - Transcripts are local-only and never published unscrubbed (`obench/scrub.py`).
 - Committed datasets live under `data/`; local scratch stays in gitignored
   `results/`.
+- The checker is the sole judge of success; never trust harness self-reports.
+- Every new task must pass `obench validate` polarity (fails untouched,
+  passes with `solution/` overlaid).
 - **Planning and continuity.** Use the accepted conversation or task as the
   contract when sufficient. Save a design, spec, or plan when it helps
   coordinate work, define acceptance, or sequence execution. Leave a concise
