@@ -242,13 +242,9 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
 - The checker is the sole judge of success; never trust harness self-reports.
 - Every new task must pass `obench validate` polarity (fails untouched,
   passes with `solution/` overlaid).
-- **Planning and continuity.** Use the accepted conversation or task as the
-  contract when sufficient. Save a design, spec, or plan when it helps
-  coordinate work, define acceptance, or sequence execution. Leave a concise
-  handoff when unfinished work transfers and the recipient needs context.
-  Commit documents needed for shared execution and keep their lifecycle status
-  current. Keep public documents self-contained and hold private evaluation
-  context with its private owner. Before moving completed execution documents
-  into the ignored `docs/archive/`, preserve lasting decisions and open work
-  in maintained references and repair incoming links. Git history retains
-  formerly tracked versions.
+- **Planning and continuity.** Reuse clear task context. Save planning docs when
+  decisions, acceptance, or coordination need persistence. Leave a brief handoff
+  only when needed to resume unfinished work. Commit shared docs and keep status
+  current. Before archiving, preserve lasting decisions and open work in
+  maintained docs and repair links. Keep public docs self-contained and private
+  evaluation context with its owner.
