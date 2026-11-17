@@ -456,3 +456,11 @@ valid alternatives, new helpers, malformed artifacts, reward forgery, and paired
 workspace/host/oracle reads. Runtime qualification includes these controls before
 its separate authenticated file-edit control. Runtime/oracle admission does not
 establish frontier-model difficulty; a fresh calibration cohort remains separate.
+
+The initial boundary qualification at `7fac584` passed ten behavioral variants,
+five Harbor lifecycle controls, and two authenticated file edits. Exact resume
+revalidated the sealed two-row suite with its four model requests unchanged.
+This is historical infrastructure evidence from
+[OpenBench PR #16](https://github.com/davisbuilds/openbench/pull/16). Qualify
+the current runtime for a new campaign. Separate extra-hard task development
+and calibration are tracked in [Extra-hard repairs](EXTRA_HARD_REPAIRS.md).

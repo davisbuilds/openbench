@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 ---
 
 # First browser evaluation
@@ -41,6 +41,10 @@ Visual preference remains a separate human assessment.
   accessibility certification, design taste, or calibrated frontier difficulty.
 
 ## Implementation checkpoint
+
+The first task shipped in OpenBench PR #30. PR #35 then replaced it for
+admission with the v2 oracle. Historical v1 observations remain usable for
+diagnostic replay. Difficulty calibration remains open in the Backlog.
 
 Implemented the task, pinned browser layer, closed browser-only seccomp profile,
 host-owned observation predicates, screenshot transport, and separate browser

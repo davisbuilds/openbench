@@ -61,7 +61,7 @@ checkout; never move a checkout while its benchmark is running.
   `scripts/ci/`; CI's fake provider does not prove authentication.
 - `compile_suite` and `sandbox_grading` hard-code Dojo. Scheme 3 hashes the whole
   grading module, so historical verification needs an explicit compatibility
-  design before extraction. Stage 4 contract is recorded in TRUSTED_ORACLE_BOUNDARY.md.
+  design before extraction. See the [versioned oracle boundary](REPAIR_SANDBOX.md#versioned-trusted-oracles).
 - Harbor owns scheduling, retries, locks, trial lifecycle and resume. Raw
   transcripts and private configuration remain local-only under `results/`.
 - Changes belong on the development checkout. Unattended controls belong on the

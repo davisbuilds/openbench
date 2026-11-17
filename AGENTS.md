@@ -242,3 +242,13 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
 - Transcripts are local-only and never published unscrubbed (`obench/scrub.py`).
 - Committed datasets live under `data/`; local scratch stays in gitignored
   `results/`.
+- **Planning and continuity.** Use the accepted conversation or task as the
+  contract when sufficient. Save a design, spec, or plan when it helps
+  coordinate work, define acceptance, or sequence execution. Leave a concise
+  handoff when unfinished work transfers and the recipient needs context.
+  Commit documents needed for shared execution and keep their lifecycle status
+  current. Keep public documents self-contained and hold private evaluation
+  context with its private owner. Before moving completed execution documents
+  into the ignored `docs/archive/`, preserve lasting decisions and open work
+  in maintained references and repair incoming links. Git history retains
+  formerly tracked versions.

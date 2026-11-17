@@ -33,7 +33,9 @@ Implemented by `obench repair package` and documented in
 [the package contract](../private-evaluation-packages.md). Offline contract tests
 cover pinning, safe export, explicit trust and malformed verdicts. The browser
 Docker CI lane exercises real private-rule replay plus solver workspace/host
-archive controls using wholly synthetic public inputs. Production integration follows the [campaign integration plan](2026-10-13-private-package-campaigns.md).
+archive controls using wholly synthetic public inputs. The subsequent
+[canonical campaign route](../private-evaluation-packages.md#canonical-campaign-route)
+shipped in OpenBench PR #37.
 
 ## Campaign integration
 

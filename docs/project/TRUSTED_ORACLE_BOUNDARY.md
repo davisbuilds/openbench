@@ -54,8 +54,9 @@ new task treatment and require fresh difficulty calibration later.
    reference 1, partial repairs with expected bucket scores, all four valid
    alternatives 1, source/read-boundary probes, malformed worker output, cleanup,
    and canonical Harbor lifecycle/import. No scored model campaign in this pass.
-5. PR, cloud review, addressed findings, green CI, merge/sync; record evidence in
-   INFRA_PASS.md. Admission proves execution and oracle validity, not difficulty.
+5. PR, cloud review, addressed findings, green CI, merge/sync; preserve evidence
+   with the [versioned oracle boundary](REPAIR_SANDBOX.md#versioned-trusted-oracles).
+   Admission covers execution and oracle validity.
 
 ## Delivery evidence
 
@@ -67,6 +68,5 @@ remain unchanged.
 
 Mini runtime qualification passed all nine offline controls and both authenticated
 file-edit controls. Admitted exact resume preserved the sealed two-row suite,
-control evidence and four-request count. Detailed local evidence pointers and
-the separate #123 follow-up are in INFRA_PASS.md. This proves the infrastructure
-contract; it makes no benchmark-difficulty claim.
+control evidence and four-request count. The evidence covers infrastructure. The #123 follow-up is tracked separately in
+[Extra-hard repairs](EXTRA_HARD_REPAIRS.md).
