@@ -21,6 +21,30 @@ upstream history no longer dictates a separate root directory for every tier.
 | `results/` | Ignored private run evidence, scratch work, and preserved worktrees/environments |
 | `.openbench/` | This checkout's suite/profile configuration and ignored execution output |
 
+## Code map
+
+Where the main capabilities live inside `obench/` and the task trees.
+
+| Area | Path |
+|------|------|
+| CLI entry (`obench …`) | `obench/cli.py`, `obench/__main__.py` |
+| Canonical suite run / sealing | `obench/suite_run.py`, `obench/suite.py` |
+| Legacy cell runner | `obench/run.py` |
+| Task workspace (snapshot + git archive) | `obench/workspace.py` |
+| Checker polarity / validate | `obench/validate_tasks.py` |
+| Task admission (structure, ownership, determinism) | `obench/admission_gate.py` |
+| Candidate / BYO harness gate | `obench/candidate_gate.py`, `obench/candidates.py` |
+| Report / stats / compare | `obench/report.py`, `obench/stats.py`, `obench/compare.py` |
+| Publish / verify digests | `obench/publish.py` |
+| Leaderboard site (harness + gateway) | `obench/site.py`, `obench/leaderboard.py`, `docs/site.md` |
+| Counting proxy | `obench/proxy.py` |
+| Harbor jobs/results/evidence | `obench/harbor_job.py`, `obench/harbor_results.py`, `obench/harbor_run.py` |
+| Versioned packs (tasks + harness) | `obench/packs.py`, `docs/task-packs.md`, `docs/packs.json` |
+| Trusted repair oracles | `obench/repair_oracles/`, `obench/repair_grading.py`, `obench/repair_worker.py` |
+| Stock adapters | `obench/adapters/` |
+| Unit tests | `obench/tests/` |
+| Tasks | `benchmarks/harbor/core/` (canonical), `benchmarks/core/` (historical compatibility), `.openbench/tasks/` (private-init) |
+
 ## Entry points and compatibility
 
 Use `obench` and its subcommands, or `python -m obench.<module>`. The deprecated
