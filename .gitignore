@@ -43,3 +43,6 @@ scrubbed/
 # reclassification/repair backups are scratch, never committed
 *.pre-reclass
 *.pre-*.bak
+
+# Local-only archive of completed execution documents
+/docs/archive/
