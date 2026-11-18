@@ -11,10 +11,16 @@ import datetime as dt
 import http.client
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from obench.http_response import forward_response_headers
 
 REDACT = "[REDACTED]"
 
@@ -80,26 +86,32 @@ class Handler(BaseHTTPRequestHandler):
         forward_path = self.path
         headers = {k: v for k, v in self.headers.items() if k.lower() not in {"host", "content-length"}}
         headers["Host"] = target.netloc
+        resp = None
         try:
             conn.request("POST", forward_path, body=raw, headers=headers)
             resp = conn.getresponse()
+            forwarded_headers = forward_response_headers(resp)
             data = resp.read()
             self.send_response(resp.status, resp.reason)
-            for k, v in resp.getheaders():
-                if k.lower() in {"transfer-encoding", "connection", "content-encoding"}:
+            for k, v in forwarded_headers:
+                if k.lower() == "content-length":
                     continue
                 self.send_header(k, v)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
         except Exception as exc:
+            self.close_connection = True
             self.send_response(502)
             self.send_header("Content-Type", "application/json")
             msg = json.dumps({"error": f"capture proxy forward failed: {exc.__class__.__name__}"}).encode()
             self.send_header("Content-Length", str(len(msg)))
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(msg)
         finally:
+            if resp is not None:
+                resp.close()
             conn.close()
 
     def log_message(self, fmt: str, *args: Any) -> None:

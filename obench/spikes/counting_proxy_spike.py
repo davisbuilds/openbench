@@ -21,17 +21,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-HOP_BY_HOP = {
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-    "host",
-}
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from obench.http_response import HOP_BY_HOP, forward_response_headers
+
 SENSITIVE_HEADERS = {"authorization", "x-api-key", "api-key", "anthropic-api-key"}
 
 
@@ -173,6 +167,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         capture_truncated = False
         headers_sent = False
         error = None
+        conn = None
+        resp = None
         try:
             body = self._read_body()
             conn_cls = http.client.HTTPSConnection if upstream.scheme == "https" else http.client.HTTPConnection
@@ -183,12 +179,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             conn = conn_cls(host, port=port, timeout=self.server.timeout_s)  # type: ignore[attr-defined]
             conn.request(self.command, upstream_path, body=body, headers=req_headers)
             resp = conn.getresponse()
+            forwarded_headers = forward_response_headers(resp)
             status = resp.status
             resp_headers = resp.getheaders()
             self.send_response(resp.status, resp.reason)
-            for key, value in resp_headers:
-                if key.lower() in HOP_BY_HOP:
-                    continue
+            for key, value in forwarded_headers:
                 self.send_header(key, value)
             # We strip upstream Transfer-Encoding; force EOF framing for any
             # response without Content-Length (common for SSE/chunked streams).
@@ -216,15 +211,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
             usage = parse_json_usage(parse_body)
             if usage is None:
                 usage = parse_sse_usage(parse_body)
-            conn.close()
         except Exception as exc:  # noqa: BLE001 - proxy spike should log exact failure
             error = f"{type(exc).__name__}: {exc}"
             if not headers_sent and not self.wfile.closed:
+                status = 502
+                self.close_connection = True
                 payload = json.dumps({"error": "proxy_upstream_failed", "detail": str(exc)}).encode()
                 try:
                     self.send_response(502)
                     self.send_header("content-type", "application/json")
                     self.send_header("content-length", str(len(payload)))
+                    self.send_header("connection", "close")
                     self.end_headers()
                     self.wfile.write(payload)
                 except Exception:
@@ -232,6 +229,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             else:
                 self.close_connection = True
         finally:
+            if resp is not None:
+                resp.close()
+            if conn is not None:
+                conn.close()
             self._write_record({
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "method": self.command,
