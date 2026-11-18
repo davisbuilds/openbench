@@ -168,6 +168,9 @@ dependencies, and a workflow self-audit.
   current. Before archiving, preserve lasting decisions and open work in
   maintained docs and repair links. Keep public docs self-contained and private
   evaluation context with its owner.
+- **TDD:** red/green for features, major refactors and large changes; the red
+  test must fail on the behavior, not on a missing symbol. For smaller edits, run
+  the relevant existing checks.
 - **Commit and push.** Commit coherent chunks, staging by explicit path. Push
   your task branch to `fork` and open a PR against `davisbuilds/openbench` once
   the work is complete and the local gate passes; don't push directly to
