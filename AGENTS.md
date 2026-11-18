@@ -1,8 +1,21 @@
 # OpenBench — Agent Context
 
-Read this first. It captures what this project is trying to become, so any agent
-or contributor picks up the strategic context, not just the mechanics in
-`README.md` / `docs/reports/writeup.md`.
+OpenBench compares coding-agent **harnesses** (codex, pi, opencode, cursor,
+devin, claude, ...): the CLI products that wrap a model in a run loop, tool set,
+and permission policy. Tasks are self-contained (`task.toml` + `instruction.md`
++ Docker environment + verifier); the verifier is the sole judge.
+
+## Documentation map
+
+- [`README.md`](README.md) and the [documentation index](docs/README.md):
+  product overview, guides, and reference.
+- [Roadmap](docs/project/ROADMAP.md): product goals, landscape position, and
+  priorities. [Backlog](docs/project/BACKLOG.md): unselected future work.
+- [Project and upstream workflow](docs/project/FORK_WORKFLOW.md): remotes, PR
+  flow, upstream promotion, and fork-local tree ownership.
+- [Repository layout](docs/project/REPOSITORY_LAYOUT.md): asset ownership, the
+  code map, and path compatibility.
+- [CI baseline](docs/project/CI.md): workflows, lanes, and stable job names.
 
 ## Local execution context
 
@@ -66,106 +79,49 @@ Before authoring or revising review/repair evaluations, read
 scope, Git comparison, ordinary instructions/tests and offline tool workflows;
 package validity and checker polarity do not establish realism.
 
-## What OpenBench is
-
-A benchmark framework for comparing coding-agent **harnesses** (codex, pi,
-opencode, cursor, devin, claude, ...) — the CLI products that wrap a model in a
-run loop, tool set, and permission policy. Tasks are self-contained
-(`task.toml` + `instruction.md` + Docker environment + verifier); the verifier
-is the sole judge.
-
 ## Execution ownership
 
-The canonical path is `obench run [suite.toml]`. OpenBench compiles immutable
-suite intent, stock/custom profiles, one exact Harbor job per task set, and
-comparison-plan sidecars. Pinned Harbor owns task/trial execution, Docker
-sandboxes, concurrency, retries, resume, locks, verifier execution, and ATIF
-artifacts. OpenBench then validates/imports every intended job as one atomic
-suite result, reconciles optional proxy evidence, and owns comparison,
-statistics, publication policy, and site acceptance.
+The canonical path is `obench run [suite.toml]`. Pinned Harbor owns task/trial
+execution, Docker sandboxes, concurrency, retries, resume, locks, verifier
+execution, and ATIF artifacts. OpenBench owns immutable suite intent, profiles,
+one exact Harbor job per task set, comparison-plan sidecars, atomic import of
+every intended job, proxy reconciliation, comparison, statistics, publication
+policy, and site acceptance. `obench legacy run` is compatibility only; manual
+Harbor export, job-run, and result-import commands are diagnostics and migration
+tools, not the default workflow.
 
-`obench legacy run` is compatibility only. Manual Harbor export, job-run, and
-result-import commands remain diagnostics and migration tools; do not describe
-them as the default workflow.
-
-## Product goals (the two things we are building toward)
-
-1. **Community harness flywheel.** Make OpenBench trivially importable and
-   usable so third parties can add their own harnesses or harness variations
-   and evaluate them against the stock adapters. If someone builds a better
-   harness or feature, they should *want* to use OpenBench to prove it and post
-   the results publicly — that showing-off loop is how the framework grows.
-2. **Company/private-codebase evals.** More teams evaluate agents on their own
-   codebases and use cases rather than general benchmarks. OpenBench should be
-   easily installable inside a private repo so companies can benchmark
-   harnesses and models on *their* tasks with the same rigor (checker polarity,
-   token metering, Wilson CIs) as the public tiers.
-
-## Our niche vs. the landscape (assessed Jul 2026)
-
-- **Harbor** (Apache-2.0, Terminal-Bench 2.0's official harness) owns
-  task/trial execution, Docker isolation, retries/resume, locks, verifiers,
-  ATIF artifacts, cloud-scale evals, its dataset registry, and the TB
-  leaderboard. OpenBench is the suite/comparison/evidence/publication layer.
-- **Prime Intellect verifiers / Environments Hub** (MIT) owns RL+eval
-  environments with a package hub (versioned wheels per environment, 1k+ envs).
-  Their distribution mechanics (versioned installable task packs, hub
-  publishing, seeded supply via bounties) are the playbook to copy; their v1 is
-  drifting toward running real CLIs, so our neutrality matters.
-- **OpenBench's defensible edge:** harness-vs-harness comparison under
-  realistic conditions — same-model pinning, subscription/OAuth auth handling,
-  counting-proxy token metering, polarity-validated checkers
-  (`obench validate`), the null negative control, and the candidate
-  admission gate (`obench/candidate_gate.py`, `docs/byo-harnesses.md`). Plus an
-  ultra-light stdlib-only, files-plus-shell-checker contract that non-Python
-  users and private repos can adopt without learning a framework API.
-
-## Code map (where to look)
-
-See [repository layout](docs/project/REPOSITORY_LAYOUT.md) for asset ownership and path compatibility.
-
-| Area | Path |
-|------|------|
-| CLI entry (`obench …`) | `obench/cli.py`, `obench/__main__.py` |
-| Canonical suite run / sealing | `obench/suite_run.py`, `obench/suite.py` |
-| Legacy cell runner | `obench/run.py` |
-| Task workspace (snapshot + git archive) | `obench/workspace.py` |
-| Checker polarity / validate | `obench/validate_tasks.py` |
-| Task admission (structure, ownership, determinism) | `obench/admission_gate.py` |
-| Candidate / BYO harness gate | `obench/candidate_gate.py`, `obench/candidates.py` |
-| Report / stats / compare | `obench/report.py`, `obench/stats.py`, `obench/compare.py` |
-| Publish / verify digests | `obench/publish.py` |
-| Leaderboard site (harness + gateway) | `obench/site.py`, `obench/leaderboard.py`, `docs/site.md` |
-| Counting proxy | `obench/proxy.py` |
-| Harbor jobs/results/evidence | `obench/harbor_job.py`, `obench/harbor_results.py`, `obench/harbor_run.py` |
-| Versioned packs (tasks + harness) | `obench/packs.py`, `docs/task-packs.md`, `docs/packs.json` |
-| Trusted repair oracles | `obench/repair_oracles/`, `obench/repair_grading.py`, `obench/repair_worker.py` |
-| Stock adapters | `obench/adapters/` |
-| Unit tests | `obench/tests/` |
-| Tasks | `benchmarks/harbor/core/` (canonical), `benchmarks/core/` (historical compatibility), `.openbench/tasks/` (private-init) |
-
-## Always-run CI (offline)
-
-Workflow changes follow [the CI baseline](docs/project/CI.md): pinned action
-SHAs and runner versions, bounded jobs, minimal permissions, superseded-run
-cancellation, frozen dependencies, and a workflow self-audit. Keep hosted
-credential-free Harbor integration separate from authenticated model campaigns.
-
-Match [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+## Local gate (matches `.github/workflows/ci.yml`)
 
 ```bash
 pip install -e .
-python3 scripts/ci/unit_tests.py   # parallel; --workers 0 runs the serial reference:
-                                   # python3 -m unittest discover -s obench/tests -v
+python3 scripts/ci/unit_tests.py   # --workers 0 runs the serial reference
 obench validate --no-imported
 obench validate --tasks-dir benchmarks/imported/terminal-bench
 obench validate --tasks-dir benchmarks/imported/exercism
+obench validate --tasks-dir benchmarks/local
 ```
 
-No live harness or model-API calls; stdlib-only. Docker-backed imported tiers,
-including Terminal-Bench 2, require a separately provisioned validation lane.
+Offline and stdlib-only: no live harness or model-API calls. Docker-backed
+imported tiers, including Terminal-Bench 2, and the pinned Harbor integration
+lanes run in separate workflows. Workflow changes follow the
+[CI baseline](docs/project/CI.md): pinned action SHAs and runner versions,
+bounded jobs, minimal permissions, superseded-run cancellation, frozen
+dependencies, and a workflow self-audit.
 
-## Dangerous zones
+## Guardrails
+
+- The checker is the sole judge of success; never trust harness self-reports.
+- Every new task must pass `obench validate` polarity (fails untouched,
+  passes with `solution/` overlaid).
+- Transcripts are local-only and never published unscrubbed (`obench/scrub.py`).
+- Committed datasets live under `data/`; local scratch stays in gitignored
+  `results/`.
+- Non-goals: no OpenBench-owned task scheduler, sandbox runtime, cloud backend,
+  or RL training story (Harbor owns execution; OpenBench owns intent and
+  evidence). Keep the stdlib-only, files-plus-shell-checker task contract; it
+  is the accessibility edge.
+
+### Dangerous zones
 
 - **Repair revisions** — follow [benchmark versioning](docs/project/BENCHMARK_VERSIONING.md).
   Advance case and oracle revisions independently; execution settings stay in
@@ -185,60 +141,40 @@ including Terminal-Bench 2, require a separately provisioned validation lane.
 - **`obench/report.py` aggregates** — key by `(harness, model)`, not harness alone.
 - **Auth / proxy / transcripts** — auth is read-only staging; transcripts are
   LOCAL-ONLY and never published unscrubbed (`obench/scrub.py`).
-- **Entry points** — use `obench` or `python -m obench.<module>`; the old `bench/` and root validator wrappers are retired.
 
-## Roadmap (priority order)
+## Git
 
-- **P0 — Package it. [DONE Jul 2026]** `pyproject.toml`, console entry points,
-  PyPI name **`obench`** (`pip install obench`, `obench run ...`). Umbrella CLI
-  (`run / report / doctor / validate / gate / compare / init / publish / verify /
-  pack / …`).
-  Custom-project discovery (`tasks/`, then `.openbench/tasks/`) when run outside the repo.
-- **P0 — Arbitrary task roots. [DONE Jul 2026]** `obench validate` accepts
-  custom task directories; `--preflight-smoke` picks a smoke task from the given
-  root (prefers `make-it-run` when present).
-- **P0 — `obench init` for private repos. [DONE Jul 2026]** `.openbench/`
-  scaffold with `openbench.toml` config defaults; git-mode workspaces
-  (`workspace.toml`: repo/ref/subdir/setup, `git archive` staging, resolved
-  SHA recorded as `workspace_source` provenance); `docs/private-evals.md`.
-- **P1 — Show-off loop. [PARTIAL Jul 2026]** `obench publish` / `obench verify`
-  ship a shareable HTML card + provenance digests (`docs/publish.md`). Still
-  open: community submission path onto the public site with CI re-verifying
-  digests, and seeding by porting 2–3 popular harnesses ourselves.
-- **P1 — Soften allowlists. [DONE Jul 2026]** `doctor.py` discovers optional
-  adapter `DOCTOR` exports (pi migrated) and accepts `--candidate` preflight;
-  proxy metering for manifests is declaration-driven (`base_url_env` +
-  `proxy_route`); candidate auth persist-back defaults off with
-  `persist_auth = true` opt-in. Docker image's fixed CLI set remains a follow-up.
-- **P1 — Harbor-first suites. [DONE Aug 2026]** `obench run [suite.toml]`
-  compiles one deterministic pinned Harbor job per task set, executes all jobs,
-  fail-closed imports Harbor locks/results/verifier/ATIF/workspace/usage
-  evidence, and atomically seals one suite JSONL plus public and local run
-  records. Exact resume is idempotent; divergent output fails.
-- **P2 — Versioned packs. [DONE Jul 2026]** Task and harness packs as
-  versioned, installable-by-name artifacts (`org/pack@version`) via
-  `obench pack` (`init` / `install` / `list` / `verify` / `publish-index`):
-  local dir, git (`git archive`), or HTTPS zip/tarball — no custom package
-  server (`docs/task-packs.md`). `pack.toml` `kind = "tasks"|"harness"`;
-  layout `.openbench/packs/<org>/<name>/<version>/` with `pack_source.json`
-  provenance (scheme-2 task digests or per-manifest `spec_sha256`). Harness
-  packs resolve as `--candidate org/name[@version][:manifest]`. Static index
-  `docs/packs.json` + site Packs section; seeds under
-  `data/packs/openbench-core-smoke/` and `data/packs/openbench-aider/`.
-  Still open: a community hub beyond the static JSON index.
+- Merge strategy: merge commits (`gh pr merge --merge`), matching `main`'s
+  history. Branches are not deleted on merge.
+- Merging to `main` deploys nothing and cuts no release: this fork has no Pages
+  site, deployment, or release automation. Publishing results is an explicit
+  `obench publish` / `obench site build` step.
+- `origin` is upstream and the GitHub parent of this fork, so `gh pr create`
+  defaults to the wrong repository; always pass `--repo davisbuilds/openbench`.
 
-## Non-goals
+## Working Agreement
 
-- No OpenBench-owned task scheduler, sandbox runtime, cloud backend, or RL
-  training story. Harbor owns execution; OpenBench owns intent and evidence.
-- Do not abandon the stdlib-only, files-plus-shell-checker task contract; it is
-  the accessibility edge.
-
-## Working conventions for agents
-
-- The checker is the sole judge of success; never trust harness self-reports.
-- Every new task must pass `obench validate` polarity (fails untouched,
-  passes with `solution/` overlaid).
-- Transcripts are local-only and never published unscrubbed (`obench/scrub.py`).
-- Committed datasets live under `data/`; local scratch stays in gitignored
-  `results/`.
+- **Clarify before building** when a request is vague, contradictory, or skips a
+  key decision; clear, well-scoped requests need no interview.
+- **Fix small issues now; backlog the rest.** Fix simple, quick, or blocking
+  issues in this repo as part of the current change and call them out. Record in
+  `docs/project/BACKLOG.md` only what can't be finished now or needs the
+  maintainer's decision; don't open a branch or PR just for a backlog entry.
+- **Keep docs current** when a change makes a documented contract, boundary,
+  procedure, or direction stale.
+- **Planning and continuity.** Reuse clear task context. Save planning docs when
+  decisions, acceptance, or coordination need persistence. Leave a brief handoff
+  only when needed to resume unfinished work. Commit shared docs and keep status
+  current. Before archiving, preserve lasting decisions and open work in
+  maintained docs and repair links. Keep public docs self-contained and private
+  evaluation context with its owner.
+- **Commit and push.** Commit coherent chunks, staging by explicit path. Push
+  your task branch to `fork` and open a PR against `davisbuilds/openbench` once
+  the work is complete and the local gate passes; don't push directly to
+  `main`. Opening an issue or PR upstream publishes to a third party: only when
+  asked.
+- **Merge** only under the standing merge authority in the maintainer's
+  workspace instructions, or when the maintainer asks. Without those
+  instructions in context, leave the PR for the maintainer.
+- **Re-ground after compaction** in source, this file, the owning docs, and
+  recent commits. A summary and your own earlier proposals are not user approval.

@@ -1,6 +1,7 @@
 # Documentation
 
-- [Repository layout](project/REPOSITORY_LAYOUT.md): where files belong and path compatibility.
+- [Roadmap](project/ROADMAP.md): product goals, landscape position, and priorities.
+- [Repository layout](project/REPOSITORY_LAYOUT.md): where files belong, the code map, and path compatibility.
 - [Setup](guides/setup.md) and [task authoring](guides/contributing-tasks.md).
 - [Campaign launch and recovery](benchmark-operations.md).
 - [Fork workflow](project/FORK_WORKFLOW.md), [backlog](project/BACKLOG.md), and [extra-hard repair work](project/EXTRA_HARD_REPAIRS.md).

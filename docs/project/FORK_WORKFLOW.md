@@ -19,19 +19,21 @@ rather than replaying old absolute launcher commands.
 | `fork`   | `github.com/davisbuilds/openbench`     | **Your trunk.** `main` tracks `fork/main`. |
 | `origin` | `github.com/minghinmatthewlam/openbench` | Upstream. Pull from occasionally; PR into it. |
 
-`main` tracks `fork/main`, so `git push` / `git pull` move against **your fork**,
-not upstream. Set `remote.pushDefault = fork` for topic branches too. Remote
-names are retained to keep existing branch tracking clear. Upstream is a source
-you integrate *from* and open PRs *to*, never a push target for your trunk.
+`main` tracks `fork/main`, so `git pull` moves against **your fork**, not
+upstream. Set `remote.pushDefault = fork` so topic branches push there too.
+Remote names are retained to keep existing branch tracking clear. Upstream is a
+source you integrate *from* and open PRs *to*, never a push target for your
+trunk. Because upstream is this fork's GitHub parent, `gh pr create` targets it
+by default: pass `--repo davisbuilds/openbench` for trunk PRs.
 
 ## The flow
 
-1. **Local first.** Build on a topic branch (or directly on `main` for
-   fork-local convenience). Red/green per the working agreements; keep commits
-   coherent.
-2. **Push to your fork.** `git push` sends `main` to `fork/main` — your backup
-   and canonical trunk. Your fork is *expected* to diverge from upstream; that is
-   part of this project's independent development.
+1. **Local first.** Build on a topic branch. Red/green per the working
+   agreements; keep commits coherent.
+2. **PR into your fork.** Push the topic branch to `fork` and open a PR against
+   `davisbuilds/openbench`; changes reach `main` only through a merged PR, never
+   a direct push. Your fork is *expected* to diverge from upstream; that is part
+   of this project's independent development.
 3. **Promote upstream only if broadly relevant.** Capability that benefits every
    openbench user goes upstream as a **clean topic branch cut from `origin/main`**
    carrying *only* that feature's commits — never your whole divergent `main`.
@@ -87,7 +89,7 @@ knowledge:
   not FAIL, and never a faked PASS. So CI exercises the portable local tasks and
   honestly skips the rest. (`benchmarks/local/am-consistency-pr80` is the worked
   example — it needs a host-native agentmonitor `node_modules`.)
-- **Portability tripwire.** `tests/test_core_task_portability.py` fails if any
+- **Portability tripwire.** `obench/tests/test_core_task_portability.py` fails if any
   `benchmarks/core/` checker hard-codes a machine-specific path or a fork-local dep var, so
   a local task can never silently re-enter core.
 
