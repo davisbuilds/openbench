@@ -44,7 +44,7 @@ def forward_response_headers(response: http.client.HTTPResponse) -> list[tuple[s
         _validate_text(value)
         low = name.lower()
         if low == "content-length":
-            if not _DECIMAL.fullmatch(value.strip()):
+            if not _DECIMAL.fullmatch(value.strip(" \t")):
                 raise ValueError("invalid upstream Content-Length")
             lengths.append(int(value))
         elif low == "transfer-encoding":

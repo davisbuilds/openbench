@@ -115,6 +115,7 @@ class ProxyResponseHeadersTests(unittest.TestCase):
         for framing in (b"Content-Length: 4\r\nContent-Length: 8",
                         b"Content-Length: 4\r\nTransfer-Encoding: chunked",
                         b"Content-Length: -1", b"Content-Length: invalid",
+                        b"Content-Length: \xa02", b"Content-Length: 2\xa0",
                         b"Transfer-Encoding: gzip, chunked",
                         b"Transfer-Encoding: chunked "):
             for kind in self.kinds:
