@@ -10,6 +10,8 @@ The supported product interface is `obench`; these scripts support development.
 - `analysis/`: analysis of saved experimental results.
 - `diagnostics/`: bounded reproductions of specific execution problems.
 - `check_publication_hygiene.py`: staged/tracked publication guard.
+- `check_comments.py`: comment ratchet against `.comment-baseline.json`
+  (`--help` lists its modes).
 
 Historical one-off launchers live in `experiments/legacy/launchers/`; they are
 not supported campaign entry points. Use `obench campaign` for new unattended runs.
