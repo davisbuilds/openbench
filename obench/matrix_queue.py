@@ -263,8 +263,6 @@ def expand_cells_grouped(
     return cells
 
 
-# ── Study identity ───────────────────────────────────────────────────────
-
 def _canonical_spec_for_digest(spec: dict[str, Any]) -> dict[str, Any]:
     """The run-defining slice of a spec, for the study digest.
 
@@ -359,8 +357,6 @@ def derive_study_identity(
     return suite, study, study_sha256
 
 
-# ── Queue state ─────────────────────────────────────────────────────────
-
 class QueueState:
     """Persistent queue state for resume-safe run management.
 
@@ -400,8 +396,6 @@ class QueueState:
     def data(self) -> dict[str, Any]:
         return self._data
 
-
-# ── Retry and arm-state tracking ────────────────────────────────────────
 
 class ArmState:
     """Per-arm retry and pause tracking."""
@@ -506,8 +500,6 @@ class ArmState:
         self.config_error = d.get("config_error")
         return self
 
-
-# ── Cell satisfaction check ─────────────────────────────────────────────
 
 def load_results_snapshot(
     results_path: str,
@@ -625,8 +617,6 @@ def wall_cap_exceeded(cumulative_wall_s: float, max_cell_wall_s: float | None) -
     return cumulative_wall_s >= max_cell_wall_s
 
 
-# ── Per-cell decision core ─────────────────────────────────────────────────
-
 class CellDecision(NamedTuple):
     """The scheduling verdict for one finished cell run.
 
@@ -693,8 +683,6 @@ def decide_cell_outcome(
     return CellDecision("scored", new_fc, new_retry, "")
 
 
-# ── Backoff ──────────────────────────────────────────────────────────────
-
 def backoff_for_failure(fc: str | None, attempt: int,
                         base_s: float = DEFAULT_RATE_LIMITED_BACKOFF_START_S) -> float:
     """Return the backoff delay in seconds before re-queueing a cell.
@@ -706,8 +694,6 @@ def backoff_for_failure(fc: str | None, attempt: int,
         return base_s * (2 ** (attempt - 1))
     return 10.0
 
-
-# ── Queue execution ─────────────────────────────────────────────────────
 
 def build_runner_command(
     cell: dict[str, Any],
@@ -829,8 +815,6 @@ def run_runner(cmd: list[str], timeout_s: float | None = None) -> tuple[int, str
     finally:
         stderr_file.close()
 
-
-# ── Scheduler ───────────────────────────────────────────────────────────
 
 class _MatrixContext:
     """Shared state + config for the per-arm drains, guarded by one lock.
@@ -1088,8 +1072,6 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
         ctx.merge_part(part_path)
 
 
-# ── Main ────────────────────────────────────────────────────────────────
-
 def run_matrix(
     spec: dict[str, Any], spec_dir: str, cwd: str, spec_path: str | None = None
 ) -> int:
@@ -1292,7 +1274,6 @@ def run_matrix(
         for a in active_arms:
             _drain_arm(a, ctx)
 
-    # ── Final summary ───────────────────────────────────────────────────
     total_planned = len(all_cells)
     total_satisfied = sum(a.satisfied for a in arm_states.values())
     exhausted = [(n, a.exhausted_cells) for n, a in arm_states.items() if a.exhausted_cells]

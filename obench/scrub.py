@@ -161,8 +161,6 @@ def find_pii(text, ctx):
     return findings
 
 
-# --- file / tree helpers ----------------------------------------------------
-
 def _read_text(path):
     """Read a file as text, tolerating undecodable bytes (transcripts are text)."""
     with open(path, "r", encoding="utf-8", errors="replace") as fh:

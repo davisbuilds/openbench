@@ -43,7 +43,6 @@ PROFILE="${OBENCH_COLIMA_PROFILE:-default}"
 AUTOSTART=0
 PROVISION_ONLY=0
 
-# ---- helpers ---------------------------------------------------------------
 info()  { printf "\033[36m[colima-benchmark]\033[0m %s\n" "$*"; }
 ok()    { printf "\033[32m  ✓\033[0m %s\n" "$*"; }
 warn()  { printf "\033[33m  ⚠\033[0m %s\n" "$*" >&2; }
@@ -103,7 +102,6 @@ for line in sys.stdin:
 ' "$PROFILE"
 }
 
-# ---- status probe ----------------------------------------------------------
 show_status() {
   if ! command -v colima &>/dev/null; then
     fail "colima not installed — run: brew install colima"
@@ -145,7 +143,6 @@ enable_brew_autostart() {
   fi
 }
 
-# ---- buildx plugin -----------------------------------------------------------
 install_buildx() {
   if dk buildx version &>/dev/null; then
     ok "docker buildx already installed: $(dk buildx version 2>/dev/null | head -1)"
@@ -163,7 +160,6 @@ install_buildx() {
   fi
 }
 
-# ---- start / restart colima --------------------------------------------------
 start_colima() {
   local action="$1"  # "start" or "restart"
   local resources cpus memory disk
@@ -207,7 +203,6 @@ start_colima() {
   ok "colima started"
 }
 
-# ---- smoke test -----------------------------------------------------------
 smoke_test() {
   info "running docker smoke test..."
   local server_version
@@ -223,7 +218,6 @@ smoke_test() {
   fi
 }
 
-# ---- doctor gate ------------------------------------------------------------
 run_doctor_gate() {
   info "running obench doctor --docker-env preflight..."
   cd "$REPO_ROOT"
