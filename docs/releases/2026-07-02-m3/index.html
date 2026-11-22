@@ -44,17 +44,14 @@
   .viz-root .lede{color:var(--ink-1); font-size:1.02rem; max-width:66ch;}
   .card{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:16px 16px 12px;}
   .cap{color:var(--muted); font-size:.82rem; margin:.6em 2px 0;}
-  /* KPI row */
   .kpi{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-top:14px;}
   .tile{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:14px 15px;}
   .tile .v{font-size:clamp(1.5rem,4.2vw,1.95rem); font-weight:650; letter-spacing:-.02em; line-height:1;}
   .tile .l{color:var(--ink-2); font-size:.86rem; margin-top:.45em;}
   .tile .v small{font-size:.62em; font-weight:600; color:var(--muted); letter-spacing:0;}
-  /* legend */
   .legend{display:flex; flex-wrap:wrap; gap:6px 16px; margin:2px 2px 12px; font-size:.86rem;}
   .legend span{display:inline-flex; align-items:center; gap:7px; color:var(--ink-2); font-variant-numeric:tabular-nums;}
   .sw{width:11px; height:11px; border-radius:3px; flex:0 0 auto;}
-  /* svg */
   .viz-root svg{display:block; width:100%; height:auto;}
   .viz-root svg text{fill:var(--ink-2); font-family:inherit;}
   .lab{fill:var(--ink-1); font-weight:600;}
@@ -62,7 +59,6 @@
   .tick{fill:var(--muted); font-variant-numeric:tabular-nums;}
   .gl{stroke:var(--grid); stroke-width:1;}
   .ax{stroke:var(--axis); stroke-width:1;}
-  /* tables */
   .scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid var(--border); border-radius:12px; background:var(--surface-1);}
   table{border-collapse:collapse; width:100%; font-size:.88rem; min-width:520px;}
   caption{text-align:left; padding:12px 14px 0; color:var(--muted); font-size:.82rem;}
@@ -298,7 +294,6 @@
     return `M${x0},${y} h${w-r} a${r},${r} 0 0 1 ${r},${r} v${h-2*r} a${r},${r} 0 0 1 ${-r},${r} h${-(w-r)} z`;
   }
 
-  /* ---- KPI tiles ---- */
   (function(){
     const t=[
       [`${DATA.headline.real_pass}/${DATA.headline.real_total}`,"real cells passed (5 harnesses)"],
@@ -343,7 +338,6 @@
       "devin\u2248codex and codex\u2248opencode overlap (not separable at n=15); codex and opencode also carry the widest spread.";
   })();
 
-  /* ---- Success table ---- */
   (function(){
     const th=`<thead><tr><th>harness</th>`+DATA.tasks.map(t=>`<th>${t}</th>`).join("")+
       `<th>overall</th><th>Wilson 95%</th><th>mean s</th><th>tokens</th></tr></thead>`;
@@ -420,7 +414,6 @@
     document.getElementById("chart-dots").appendChild(s);
   })();
 
-  /* ---- Timing table ---- */
   (function(){
     const th=`<thead><tr><th>harness</th><th>mean s</th><th>95% CI (s)</th><th>sd s</th><th>vs next slower</th></tr></thead>`;
     const ord=DATA.order;
