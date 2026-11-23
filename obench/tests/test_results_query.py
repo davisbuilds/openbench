@@ -41,28 +41,21 @@ class ResultsQueryTests(unittest.TestCase):
         rows = [_row("pi", "m", "t", 1, "rate_limited"),
                 _row("pi", "m", "t", 1, "solved", True)]
         out = _run("summary", _write(rows))
-        # 1 solved, 1 judged, 1 planned, 100% coverage -- not 2 rows.
         self.assertRegex(out, r"pi x m\s+1\s+1\s+1\s+100%\s+100%")
 
     def test_force_rerun_latest_verdict_wins_regardless_of_file_order(self):
-        # Two judged attempts at the same cell (a --force rerun after a
-        # wrong_answer). The published rate must NOT depend on which line comes
-        # first in the file: the chronologically-later attempt supersedes.
         early = _row("pi", "m", "t", 1, "wrong_answer", False, ts="2026-01-01T00:00")
         late = _row("pi", "m", "t", 1, "solved", True, ts="2026-01-02T00:00")
         for order in ([early, late], [late, early]):
             out = _run("summary", _write(order))
             line = [l for l in out.splitlines() if l.startswith("pi x m")][0]
-            # latest attempt (solved) wins both ways: 1 solved / 1 judged.
             self.assertRegex(line, r"pi x m\s+1\s+1\s+1\s+100%")
 
     def test_judged_beats_excluded_even_when_excluded_is_later(self):
-        # A real verdict must not be erased by a later infra-family rerun.
         verdict = _row("pi", "m", "t", 1, "wrong_answer", False, ts="2026-01-01T00:00")
         later_infra = _row("pi", "m", "t", 1, "rate_limited", False, ts="2026-01-09T00:00")
         out = _run("summary", _write([verdict, later_infra]))
         line = [l for l in out.splitlines() if l.startswith("pi x m")][0]
-        # judged=1 (the wrong_answer), planned=1, 100% coverage.
         self.assertRegex(line, r"pi x m\s+0\s+1\s+1\s+0%\s+100%")
 
     def test_low_coverage_warns_and_names_missing_cells(self):
@@ -73,9 +66,6 @@ class ResultsQueryTests(unittest.TestCase):
         self.assertIn("t#t2", out)
 
     def test_matched_uses_cells_not_tasks(self):
-        # Arm A has verdicts on trials 1-2, arm B only on trial 1: matched must
-        # be ONE cell, not "the task". The hand-rolled version of this
-        # comparison aggregated per-task and mixed unmatched trials.
         rows = [_row("pi", "a", "t", 1, "solved", True),
                 _row("pi", "a", "t", 2, "solved", True),
                 _row("pi", "b", "t", 1, "wrong_answer"),
@@ -92,9 +82,6 @@ class ResultsQueryTests(unittest.TestCase):
         self.assertIn("infra-family: 1", out)
 
     def test_mixed_host_arms_are_flagged(self):
-        # tb-mid really did run deepseek on the laptop (the only host with its
-        # API key) and the other arms on the mini. Solve rates survive that;
-        # wall-time comparisons do not, and nothing in the numbers reveals it.
         rows = [_row("pi", "a", "t", 1, "solved", True),
                 _row("pi", "b", "t", 1, "solved", True)]
         rows[0]["host"] = "laptop"
@@ -111,18 +98,15 @@ class ResultsQueryTests(unittest.TestCase):
         self.assertNotIn("MIXED-HOST WARNING", _run("summary", _write(rows)))
 
     def test_rows_without_host_are_reported_as_unverifiable(self):
-        # Every row predating the `host` field falls in here; silence would
-        # imply single-host provenance we cannot actually confirm.
         out = _run("summary", _write([_row("pi", "a", "t", 1, "solved", True)]))
         self.assertIn("HOST-UNKNOWN", out)
 
     def test_never_run_cells_are_flagged_not_hidden(self):
-        # `planned` counts cells with at least one ROW, so a cell that never ran
-        # is invisible to coverage: pi x deepseek read 100% on tb-mid while
-        # holding 14 of 18 cells. That is the exact case coverage exists for.
+        # WHY: Coverage includes only cells with rows. The fixture leaves one cell absent to
+        # test detection of unattempted work.
         rows = [_row("pi", "a", "t1", 1, "solved", True),
                 _row("pi", "a", "t2", 1, "solved", True),
-                _row("pi", "b", "t1", 1, "solved", True)]  # arm b never ran t2
+                _row("pi", "b", "t1", 1, "solved", True)]
         out = _run("summary", _write(rows))
         self.assertIn("MISSING-CELLS pi x b", out)
         self.assertIn("t2#t1", out)
@@ -134,13 +118,12 @@ class ResultsQueryTests(unittest.TestCase):
         self.assertNotIn("MISSING-CELLS", _run("summary", _write(rows)))
 
     def test_arms_on_different_cli_versions_are_flagged(self):
-        # The launch-time pin gate is per-host, so it cannot catch this: each
-        # host was internally consistent while the two arms differed. Only a
-        # check at the point of COMPARISON catches it.
+        # WHY: Host-local preflight can pass on each runner even when two arms used different
+        # versions. Detect skew at comparison time.
         rows = [_row("pi", "a", "t", 1, "solved", True),
                 _row("pi", "b", "t", 1, "solved", True)]
         rows[0]["harness_version"] = "0.82.0 (/usr/local/bin/pi)"
-        rows[1]["harness_version"] = "0.80.10 (/usr/local/bin/pi)"  # same harness
+        rows[1]["harness_version"] = "0.80.10 (/usr/local/bin/pi)"
         out = _run("summary", _write(rows))
         self.assertIn("MIXED-HARNESS WARNING", out)
         self.assertIn("indistinguishable from a model one", out)
@@ -161,8 +144,6 @@ class ResultsQueryTests(unittest.TestCase):
         self.assertIn("not internally consistent", out)
 
     def test_different_harnesses_with_different_versions_are_NOT_flagged(self):
-        # pi 0.80.10 vs opencode 1.18.3 are different tools, not a version skew.
-        # The first version of this check fired on exactly this and was wrong.
         rows = [_row("pi", "m", "t", 1, "solved", True),
                 _row("opencode", "m", "t", 1, "solved", True)]
         rows[0]["harness_version"] = "0.80.10"

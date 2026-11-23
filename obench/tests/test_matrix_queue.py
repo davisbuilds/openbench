@@ -120,7 +120,7 @@ tasks = ["hello"]
         arms = [{"harness": "pi", "model": "a"}, {"harness": "codex", "model": "b"}]
         tasks = ["t1", "t2"]
         cells = mq.expand_cells(arms, tasks, 2)
-        self.assertEqual(len(cells), 8)  # 2 arms * 2 tasks * 2 trials
+        self.assertEqual(len(cells), 8)
         ids = [c["run_id"] for c in cells]
         self.assertIn("pi:t1:a:trial1", ids)
         self.assertIn("codex:t2:b:trial2", ids)
@@ -185,10 +185,6 @@ class CellSatisfactionTests(unittest.TestCase):
         self.assertFalse(mq.cell_is_satisfied({"failure_class": "rate_limited"}))
 
     def test_capture_cost_uses_capture_cost_flag_not_proxy(self):
-        # capture_cost enables the counting proxy for metering WITHOUT the stall
-        # watchdog. It must emit --capture-cost, NOT --proxy: run.py forces a
-        # 600s stall timeout on any --proxy, which would kill legitimately
-        # long-thinking cells on a cost-only run.
         cell = {"harness": "codex", "model": "minimax-m3", "task": "t", "trial": 1}
         cmd = mq.build_runner_command(
             cell, "/tmp/r.jsonl", None, 2400, None, "local", capture_cost=True)
@@ -197,7 +193,6 @@ class CellSatisfactionTests(unittest.TestCase):
         self.assertNotIn("--stall-timeout", cmd)
 
     def test_stall_run_uses_proxy(self):
-        # A stall timeout still wants --proxy (metering + watchdog together).
         cell = {"harness": "codex", "model": "minimax-m3", "task": "t", "trial": 1}
         cmd = mq.build_runner_command(
             cell, "/tmp/r.jsonl", None, 2400, 600, "local", capture_cost=True)
@@ -213,16 +208,14 @@ class CellSatisfactionTests(unittest.TestCase):
 
     def test_unmetered_open_arms_flags_open_not_subscription(self):
         arms = [
-            {"harness": "codex", "model": "minimax-m3"},        # open -> flag
-            {"harness": "codex", "model": "deepseek-v4-flash-0731"},  # open -> flag
-            {"harness": "codex", "model": "gpt-5.6-terra"},     # subscription -> skip
+            {"harness": "codex", "model": "minimax-m3"},
+            {"harness": "codex", "model": "deepseek-v4-flash-0731"},
+            {"harness": "codex", "model": "gpt-5.6-terra"},
         ]
-        # Metering off: only the open arms are flagged.
         self.assertEqual(
             mq.unmetered_open_arms(arms, proxy_will_run=False),
             ["deepseek-v4-flash-0731", "minimax-m3"],
         )
-        # Metering on: nothing to warn about.
         self.assertEqual(mq.unmetered_open_arms(arms, proxy_will_run=True), [])
 
     def test_stalled_is_not_satisfied(self):
@@ -238,7 +231,6 @@ class CellSatisfactionTests(unittest.TestCase):
         """A row with no failure_class uses class_for_report to derive it."""
         row = {"success": False, "checker_exit": 1, "completed": True,
                "error": "something", "tokens": 100}
-        # Should derive as wrong_answer (satisfied)
         self.assertTrue(mq.cell_is_satisfied(row))
 
 
@@ -393,7 +385,7 @@ class RetryBudgetTests(unittest.TestCase):
 
     def test_backoff_other_failures(self):
         d = mq.backoff_for_failure("infra", 1, 60)
-        self.assertEqual(d, 10.0)  # fixed 10s for non-rate-limited
+        self.assertEqual(d, 10.0)
 
 
 class RunnerCommandBuildingTests(unittest.TestCase):
@@ -431,7 +423,6 @@ class RunnerCommandBuildingTests(unittest.TestCase):
         cell = {"harness": "pi", "model": "a", "task": "t1", "trial": 1}
         cmd = mq.build_runner_command(cell, "r.jsonl", "/t", 2400, None, "local")
         self.assertNotIn("--stall-timeout", cmd)
-        # proxy is only added when stall_timeout is set
         self.assertNotIn("--proxy", cmd)
 
     def test_version_drift_flag_omitted_by_default(self):
@@ -485,7 +476,7 @@ class StudyIdentityTests(unittest.TestCase):
                 self._spec(), "/x/am-consistency.toml", state)
             self.assertEqual(suite, "am-consistency")
             self.assertTrue(study.startswith("am-consistency-"))
-            self.assertNotEqual(study, suite)  # run-level != config-level
+            self.assertNotEqual(study, suite)
             self.assertEqual(len(sha), 64)
             self.assertEqual(state.get("study_identity")["study"], study)
             self.assertEqual(state.get("study_identity")["study_sha256"], sha)
@@ -495,16 +486,12 @@ class StudyIdentityTests(unittest.TestCase):
             path = os.path.join(d, "queue-state.json")
             _, study1, sha1 = mq.derive_study_identity(
                 self._spec(), "/x/am-consistency.toml", mq.QueueState(path))
-            # A resume reloads state from disk: same campaign, same identity.
             _, study2, sha2 = mq.derive_study_identity(
                 self._spec(), "/x/am-consistency.toml", mq.QueueState(path))
             self.assertEqual(study1, study2)
             self.assertEqual(sha1, sha2)
 
     def test_distinct_runs_get_distinct_sha(self):
-        # Two fresh campaigns (separate queue state) of the identical spec must
-        # be two studies, even minted back-to-back, so the frontier never merges
-        # arms/costs across runs.
         with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
             _, _, sha1 = mq.derive_study_identity(
                 self._spec(), "/x/am-consistency.toml",
@@ -515,23 +502,16 @@ class StudyIdentityTests(unittest.TestCase):
             self.assertNotEqual(sha1, sha2)
 
     def test_variant_spec_sharing_campaign_reuses_identity(self):
-        # Operational variants (am-consistency-tl / -noLaguna) point at one
-        # results_path/ledger_dir to resume a single bake-off under different
-        # filenames. The shared queue state -- not the spec name -- is the
-        # identity anchor, so a variant run must inherit the persisted study, not
-        # mint a second one that splits the frontier. (Codex PR #2 P1.)
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "queue-state.json")
-            # First launch: the tl variant (no `name`, stem am-consistency-tl).
             suite1, study1, sha1 = mq.derive_study_identity(
                 {**self._spec(), "name": None},
                 "/x/am-consistency-tl.toml", mq.QueueState(path))
-            # Resume the SAME campaign with the full spec (name=am-consistency).
             suite2, study2, sha2 = mq.derive_study_identity(
                 self._spec(), "/x/am-consistency.toml", mq.QueueState(path))
             self.assertEqual(sha1, sha2)
             self.assertEqual(study1, study2)
-            self.assertEqual(suite1, suite2)  # variants share one suite label
+            self.assertEqual(suite1, suite2)
 
     def test_suite_falls_back_to_spec_filename_stem(self):
         spec = self._spec()
@@ -548,14 +528,9 @@ class MissingTaskImagesTests(unittest.TestCase):
     """Preflight for pinned per-task docker images."""
 
     def test_local_group_without_tasks_dir_is_skipped_not_crashed(self):
-        # A local task group omits tasks_dir (runner resolves via discovery) and
-        # pins no docker image. The preflight must skip it, not os.path.join a
-        # None tasks_dir -- that TypeError killed an all-local spec before any
-        # cell ran.
         spec = {
             "task_group": [{"tasks": ["make-it-run", "webcore"]}],
         }
-        # docker_runner must never be consulted for a local group.
         def _fail(_ref):
             raise AssertionError("docker inspect should not run for a local group")
         self.assertEqual(mq.missing_task_images(spec, "/spec/dir", docker_runner=_fail), [])
@@ -696,7 +671,6 @@ class TasksDirOmittedWhenUnsetTests(unittest.TestCase):
         cmd = mq.build_runner_command(cell, "/r.jsonl", None, 60, None, "local")
         self.assertIn("--tasks-dir", cmd)
         self.assertIn("/group/dir", cmd)
-        # Per-group exec_mode on the cell wins over the default.
         self.assertIn("--exec", cmd)
         self.assertIn("docker", cmd)
 
@@ -731,13 +705,10 @@ class GroupedCellExpansionTests(unittest.TestCase):
 
     def test_resolve_group_tasks_dir_precedence(self):
         spec = {"tasks_dir": "spec-tasks"}
-        # Group-level wins.
         self.assertTrue(mq.resolve_group_tasks_dir(
             {"tasks_dir": "grp"}, spec, "/base").endswith("/base/grp"))
-        # Falls back to spec-level.
         self.assertTrue(mq.resolve_group_tasks_dir(
             {}, spec, "/base").endswith("/base/spec-tasks"))
-        # Neither set -> None (runner resolves).
         self.assertIsNone(mq.resolve_group_tasks_dir({}, {}, "/base"))
 
 
@@ -767,7 +738,6 @@ class CoverageCannotExceedPlannedTests(unittest.TestCase):
         arm.satisfied_cells.update({"a", "b"})
         restored = mq.ArmState.from_dict(arm.to_dict())
         self.assertEqual(restored.satisfied, 2)
-        # Re-adding the same cells after a resume must not inflate the count.
         restored.satisfied_cells.update({"a", "b"})
         self.assertEqual(restored.satisfied, 2)
 
@@ -863,8 +833,8 @@ class ResumeWallCapTests(unittest.TestCase):
                             "completed": False,
                         }) + "\n")
 
-            # The external agent boundary writes a genuine persisted verdict;
-            # the matrix queue and its resume state run unchanged.
+            # WHY: Keep verdict persistence in the real queue so the test exercises resume
+            # against the same durable output as an agent run.
             targets = []
             def finish_cell(cmd, _timeout):
                 cell = by_model[cmd[cmd.index("--model") + 1]]

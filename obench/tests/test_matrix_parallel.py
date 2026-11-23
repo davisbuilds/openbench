@@ -94,9 +94,8 @@ class MatrixIntegrationTests(unittest.TestCase):
         rc = mq.run_matrix(_spec(workers=1), self.tmp, self.tmp)
         self.assertEqual(rc, 0)
         rows = self._results()
-        self.assertEqual(len(rows), 6)  # 2 arms x 3 tasks x 1 trial
+        self.assertEqual(len(rows), 6)
         self.assertEqual(len({r["run_id"] for r in rows}), 6)
-        # every row is a clean single JSON object (no interleave/torn lines)
         self.assertTrue(all(r["failure_class"] == "solved" for r in rows))
 
     def test_parallel_matches_serial_coverage(self):
@@ -112,22 +111,18 @@ class MatrixIntegrationTests(unittest.TestCase):
         mq.run_runner = _make_fake_runner(delay=0.05, record_concurrency=seen, lock=lock)
         rc = mq.run_matrix(_spec(workers=2), self.tmp, self.tmp)
         self.assertEqual(rc, 0)
-        # two arms on distinct workers must have run cells concurrently at least once
         self.assertGreaterEqual(max(seen), 2, "arms never overlapped -- not parallel")
 
     def test_no_torn_lines_under_concurrency(self):
         mq.run_runner = _make_fake_runner(delay=0.01)
         mq.run_matrix(_spec(workers=2, trials=2), self.tmp, self.tmp)
-        # Re-read raw: every line must parse (a torn append would raise).
         path = os.path.join(self.tmp, "results.jsonl")
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 if line.strip():
-                    json.loads(line)  # raises on a torn/interleaved write
+                    json.loads(line)
 
     def test_serial_writes_directly_no_part_files(self):
-        # Durability: at workers=1 the child appends straight to results.jsonl
-        # (like the pre-refactor runner), so no part-file merge window exists.
         mq.run_runner = _make_fake_runner()
         mq.run_matrix(_spec(workers=1), self.tmp, self.tmp)
         leftover = [f for f in os.listdir(self.tmp) if ".jsonl.part." in f]
@@ -140,9 +135,8 @@ class MatrixIntegrationTests(unittest.TestCase):
         self.assertEqual(leftover, [], f"parallel run leaked part files: {leftover}")
 
     def test_salvages_stranded_part_file_on_resume(self):
-        # Simulate a kill that left an arm's part file unmerged: pre-seed it with
-        # a completed row, then run with a runner that would FAIL that same cell.
-        # The salvaged row must still count the cell as done (not re-run+fail).
+        # WHY: Make a rerun produce a failing verdict so a resume that ignores the salvaged
+        # row cannot still pass.
         results = os.path.join(self.tmp, "results.jsonl")
         arm = "codex x m1"
         part = mq._arm_part_path(results, arm)
@@ -157,7 +151,7 @@ class MatrixIntegrationTests(unittest.TestCase):
         def runner_fails_t1(cmd, timeout_s=None):
             base = _make_fake_runner()
             if _arg(cmd, "--task") == "t1" and _arg(cmd, "--model") == "m1":
-                return 1, "boom"  # would-be failure if the cell were re-run
+                return 1, "boom"
             return base(cmd, timeout_s)
 
         mq.run_runner = runner_fails_t1
@@ -167,16 +161,11 @@ class MatrixIntegrationTests(unittest.TestCase):
         self.assertIn(stranded_id, solved, "stranded part-file row was not salvaged")
 
     def test_resume_from_persisted_pending(self):
-        # A prior run persisted a pending queue; a fresh run_matrix must pick it
-        # up and complete those cells (resume path used for both paused + normal).
         import shutil
         mq.run_runner = _make_fake_runner()
-        # First pass: run only m1's cells by pre-seeding queue-state pending.
         rc = mq.run_matrix(_spec(workers=1), self.tmp, self.tmp)
         self.assertEqual(rc, 0)
         first = len(self._results())
-        # Wipe results but keep ledger/queue-state, then re-run: satisfied cells
-        # are re-verified from an empty file -> re-executed to full coverage.
         os.remove(os.path.join(self.tmp, "results.jsonl"))
         rc2 = mq.run_matrix(_spec(workers=1), self.tmp, self.tmp)
         self.assertEqual(rc2, 0)
@@ -185,8 +174,6 @@ class MatrixIntegrationTests(unittest.TestCase):
 
 class ContextSaveTests(unittest.TestCase):
     def test_save_persists_paused_cells_in_pending(self):
-        # Regression for the resume-semantics change: paused cells must survive a
-        # save() so a killed-while-paused arm resumes them (main dropped them).
         tmp = tempfile.mkdtemp()
         self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
         qpath = os.path.join(tmp, "queue-state.json")

@@ -29,16 +29,17 @@ import unittest
 from obench import paths
 from obench.run import ROW_FIELDS
 
-# Reported by an adapter but deliberately not persisted per-field.
+# WHY: Local evidence can contain full transcripts or parser details. The public row carries
+# stable derived fields.
 NOT_PERSISTED = {
-    "full_output",      # local-only transcript; never published
-    "final_message",    # stored only in the local evidence bundle
-    "tool_events",      # stored only in the local evidence bundle
-    "evidence_error",   # local parser detail; row carries a stable status code
-    "output_tail",      # ditto, trimmed copy
-    "cmd",              # rewritten by docker_exec into a nested dict
-    "candidate_version",  # folded into harness_version
-    "tokens",           # recomputed by the runner from the split
+    "full_output",
+    "final_message",
+    "tool_events",
+    "evidence_error",
+    "output_tail",
+    "cmd",
+    "candidate_version",
+    "tokens",
 }
 
 
@@ -89,15 +90,12 @@ class AdapterFieldPlumbingTests(unittest.TestCase):
             f"copies them into the row, so they persist as None: {dropped}")
 
     def test_the_two_limit_fields_specifically(self):
-        # The concrete miss: a docker cell recorded ctx=None while the container
-        # had 1048576, because this copy was absent.
         copied = _copied_into_row(os.path.join(paths.PACKAGE_DIR, "run.py"))
         for field in ("model_context_window", "model_max_tokens"):
             self.assertIn(field, copied, f"{field} is never copied into the row")
             self.assertIn(field, ROW_FIELDS, f"{field} is not in ROW_FIELDS")
 
     def test_the_guard_catches_a_dropped_field(self):
-        # Negative control for the AST extraction itself.
         import tempfile
         fd, path = tempfile.mkstemp(suffix=".py")
         try:

@@ -33,7 +33,7 @@ class ConfigHashTests(unittest.TestCase):
             h1 = bridge_cli.config_hash(path)
             h2 = bridge_cli.config_hash(path)
             self.assertEqual(h1, h2)
-            self.assertEqual(len(h1), 64)  # sha256 hex digest
+            self.assertEqual(len(h1), 64)
 
     def test_hash_changes_when_content_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,11 +77,11 @@ class StateFileTests(unittest.TestCase):
     def test_remove_state_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "state.json")
-            bridge_cli.remove_state(path)  # missing file: must not raise
+            bridge_cli.remove_state(path)
             bridge_cli.write_state(path, {"pid": 1})
             bridge_cli.remove_state(path)
             self.assertFalse(os.path.exists(path))
-            bridge_cli.remove_state(path)  # already gone: must not raise
+            bridge_cli.remove_state(path)
 
 
 class PidAliveTests(unittest.TestCase):
@@ -94,7 +94,6 @@ class PidAliveTests(unittest.TestCase):
         self.assertFalse(bridge_cli.pid_alive(-1))
 
     def test_implausible_pid_is_not_alive(self):
-        # A pid far beyond any plausible live process on a dev/CI box.
         self.assertFalse(bridge_cli.pid_alive(2**30))
 
 
@@ -110,8 +109,8 @@ class PortOpenTests(unittest.TestCase):
             srv.close()
 
     def test_closed_port_is_not_reachable(self):
-        # Bind-then-close to get a port almost certainly unused, avoiding a
-        # flaky hardcoded port number.
+        # WHY: Use an ephemeral port to avoid depending on a fixed port staying free during
+        # tests.
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.bind(("127.0.0.1", 0))
         port = srv.getsockname()[1]
@@ -132,8 +131,6 @@ class WaitForPortTests(unittest.TestCase):
         self.assertEqual(calls["sleep"], 0)
 
     def test_polls_until_open_then_succeeds(self):
-        # Reports closed twice, then open; a mock clock never reaches the
-        # deadline so success comes only from the probe flipping to open.
         probe_results = iter([False, False, True])
         with mock.patch.object(bridge_cli, "port_open",
                                 side_effect=lambda *a, **k: next(probe_results)):
@@ -282,7 +279,6 @@ class CmdUpOrchestrationTests(unittest.TestCase):
                 rc = bridge_cli.cmd_up(self._args())
         self.assertEqual(rc, 1)
         self.assertIn("did not come up", stderr.getvalue())
-        # No state recorded for a bridge that never became healthy.
         self.assertIsNone(bridge_cli.read_state(bridge_cli._state_path()))
 
 
@@ -304,8 +300,8 @@ class CmdDownTests(unittest.TestCase):
         self.assertIn("not running", stdout.getvalue())
 
     def test_down_clears_state_file(self):
-        # pid_alive stubbed False so the pid-already-gone path is exercised
-        # without signalling a real (unrelated) process.
+        # WHY: Do not signal the test runner while exercising state cleanup for a stale
+        # process.
         state_path = bridge_cli._state_path()
         bridge_cli.write_state(state_path, {"pid": os.getpid()})
         with mock.patch.object(bridge_cli, "pid_alive", return_value=False):
@@ -316,8 +312,6 @@ class CmdDownTests(unittest.TestCase):
         self.assertFalse(os.path.exists(state_path))
 
     def test_down_terminates_a_live_tracked_process(self):
-        # Exercises the SIGTERM path against a real disposable child process
-        # instead of mocking os.kill outright.
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
         try:
             state_path = bridge_cli._state_path()
@@ -384,7 +378,6 @@ class CmdStatusTests(unittest.TestCase):
         self.assertIn("STALE", stdout.getvalue())
 
     def test_status_untracked_process_reports_up_without_sync_claim(self):
-        # Port open, but no state file at all (started outside our tool).
         with mock.patch.object(bridge_cli, "port_open", return_value=True):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):

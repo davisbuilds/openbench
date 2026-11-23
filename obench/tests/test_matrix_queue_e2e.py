@@ -36,9 +36,8 @@ class MatrixQueueE2ETests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="mq_e2e_")
         self.tasks_dir = os.path.join(self.tmp, "tasks")
-        # One trivial task whose checker always passes: the null control edits
-        # nothing, so an always-pass checker gives us a clean success=true row
-        # (solved -> satisfied) without needing any real harness.
+        # WHY: The null harness makes no edits. An always-pass checker gives the test a real
+        # scored row without an external agent.
         self._make_task("trivial", checker_exit=0)
         self.results_rel = os.path.join("out", "results.jsonl")
         self.results_path = os.path.join(self.tmp, self.results_rel)
@@ -80,10 +79,9 @@ class MatrixQueueE2ETests(unittest.TestCase):
                 line = line.strip()
                 if line:
                     r = json.loads(line)
-                    rows[r["run_id"]] = r  # last wins
+                    rows[r["run_id"]] = r
         return rows
 
-    # ── (c) a genuine end-to-end run reaches 100% coverage ──────────────────
 
     def test_end_to_end_null_harness_reaches_full_coverage(self):
         spec = self._write_spec(f"""
@@ -104,7 +102,6 @@ class MatrixQueueE2ETests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0,
                          f"expected full coverage exit 0.\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
 
-        # Cells actually got rows written by a real runner subprocess.
         rows = self._rows()
         self.assertEqual(len(rows), 2, f"expected 2 rows (1 task x 2 trials); got {list(rows)}")
         for run_id, row in rows.items():
@@ -112,11 +109,9 @@ class MatrixQueueE2ETests(unittest.TestCase):
             self.assertEqual(row["failure_class"], "solved", row)
             self.assertEqual(row["harness"], "null")
 
-        # Coverage report shows 100%.
         self.assertIn("null x control: 2/2 (100.0%)", proc.stdout, proc.stdout)
         self.assertIn("Total: 2/2 satisfied", proc.stdout)
 
-    # ── (d) a cell whose only prior row is excluded-class is re-run ──────────
 
     def test_excluded_class_only_row_is_rerun_to_satisfied(self):
         """A cell whose sole prior row is excluded (infra) must be re-run.
@@ -126,7 +121,6 @@ class MatrixQueueE2ETests(unittest.TestCase):
         cell would never become satisfied -- exactly the coverage gap.
         """
         run_id = "null:trivial:control:trial1"
-        # Pre-seed the results log with an excluded-class (infra) row only.
         _write(self.results_path,
                json.dumps({"run_id": run_id, "harness": "null", "model": "control",
                            "task": "trivial", "trial": 1, "success": False,
@@ -150,12 +144,10 @@ class MatrixQueueE2ETests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0,
                          f"excluded cell should be re-run to satisfied.\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
 
-        # A fresh solved row was appended, and last-row-wins makes it satisfied.
         rows = self._rows()
         self.assertIn(run_id, rows)
         self.assertEqual(rows[run_id]["failure_class"], "solved", rows[run_id])
         self.assertTrue(rows[run_id]["success"])
-        # Two physical lines: the seeded infra row then the fresh solved row.
         with open(self.results_path, encoding="utf-8") as fh:
             line_count = sum(1 for line in fh if line.strip())
         self.assertEqual(line_count, 2, "the runner must append a NEW row, not skip the cell")
@@ -249,7 +241,6 @@ class MatrixQueueE2ETests(unittest.TestCase):
         arm = state["arm_states"]["null x control"]
         self.assertEqual(arm["exhausted_cells"], [])
 
-    # ── (b) a failed runner invocation is noticed, not silently exhausted ────
 
     def test_no_row_nonzero_exit_stops_arm_as_config_error(self):
         """Nonzero runner exit + no row written => CONFIG-ERROR, not EXHAUSTED.
@@ -279,14 +270,11 @@ class MatrixQueueE2ETests(unittest.TestCase):
         combined = proc.stdout + proc.stderr
         self.assertIn("CONFIG-ERROR", combined, combined)
         self.assertIn("[CONFIG-ERROR]", proc.stdout, proc.stdout)
-        # The runner's own reason is surfaced -- never a silent EXHAUSTED.
         self.assertIn("dropped from the active set", combined)
         self.assertNotIn("EXHAUSTED", proc.stdout,
                          "a no-row config failure must not be reported as retry exhaustion")
-        # No row was written for the failed cell.
         self.assertEqual(self._rows(), {})
 
-    # ── (a) per-task-group tasks_dir + exec_mode; omit --tasks-dir ──────────
 
     def test_mixed_task_groups_local_and_docker_exec_mode(self):
         """Two task groups with distinct tasks_dir/exec_mode both run.
@@ -296,7 +284,6 @@ class MatrixQueueE2ETests(unittest.TestCase):
         identically in either exec mode) and point exec at docker only nominally;
         the point is that each cell carries its group's tasks_dir + exec_mode.
         """
-        # Second group lives in a different tasks tree.
         other_tasks = os.path.join(self.tmp, "tb-tasks")
         td2 = os.path.join(other_tasks, "tb-trivial")
         _write(os.path.join(td2, "instruction.md"), "tb task\n")

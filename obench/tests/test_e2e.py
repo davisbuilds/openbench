@@ -59,10 +59,9 @@ class TestEndToEnd(unittest.TestCase):
         return proc
 
     def test_relative_tasks_dir_from_other_cwd(self):
-        # Regression: the checker runs with cwd=temp workdir, so a relative
-        # --tasks-dir must still resolve. Drive run.py from the repo root with
-        # relative dirs and confirm the fake adapter still solves the task.
-        rel_fixtures = os.path.relpath(FIXTURES_DIR, BENCH_DIR)  # tests/fixtures
+        # WHY: The checker switches to the task workspace. The input directory is relative to
+        # the original invocation directory.
+        rel_fixtures = os.path.relpath(FIXTURES_DIR, BENCH_DIR)
         rel_fixtures = os.path.join("obench", rel_fixtures)
         results = os.path.join(self.tmp, "rel.jsonl")
         proc = subprocess.run(
@@ -72,7 +71,7 @@ class TestEndToEnd(unittest.TestCase):
              "--results-path", results,
              "--adapters-dir", rel_fixtures,
              "--tasks-dir", rel_fixtures],
-            cwd=os.path.dirname(BENCH_DIR),  # repo root
+            cwd=os.path.dirname(BENCH_DIR),
             capture_output=True, text=True,
         )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
@@ -130,7 +129,6 @@ class TestEndToEnd(unittest.TestCase):
 
         proc = self._run("fake_adapter")
         second = read_rows(self.results_path)
-        # No new row appended; skip reported.
         self.assertEqual(len(second), 1, "resumed run must not duplicate the cell")
         self.assertIn("SKIP", proc.stdout)
         self.assertIn("skipped=1", proc.stdout)
@@ -180,22 +178,17 @@ class TestEndToEnd(unittest.TestCase):
         self.assertIn("wilson95", text)
 
     def test_efficiency_report_reflects_fixture_tokens(self):
-        # The fixture adapter reports tokens=42, turns=1 and solves the task, so
-        # the efficiency view must surface tokens/turns per solve for it and a
-        # dash for the null control (which reports neither).
         self._run("null")
         self._run("fake_adapter")
         eff = report.build_efficiency_report(self.results_path)
         self.assertIn("turns/slv", eff)
         fake = next(l for l in eff.splitlines() if l.startswith("fake_adapter"))
-        self.assertIn("42", fake)   # tokens/solve = 42/1
-        self.assertIn("1.0", fake)  # turns/solve  = 1/1
+        self.assertIn("42", fake)
+        self.assertIn("1.0", fake)
         null = next(l for l in eff.splitlines() if l.startswith("null"))
-        self.assertTrue(null.rstrip().endswith("-"))  # null: no turn data
+        self.assertTrue(null.rstrip().endswith("-"))
 
     def test_checker_timeout(self):
-        # The slow-checker fixture sleeps 30s; a 1s --checker-timeout must abort
-        # it and record checker_exit="timeout", success=false, without hanging.
         proc = subprocess.run(
             [sys.executable, *RUN_MOD,
              "--task", "slow-checker",
@@ -215,7 +208,6 @@ class TestEndToEnd(unittest.TestCase):
         self.assertFalse(row["success"], "a timed-out checker must not succeed")
 
     def test_pristine_workspace_untouched(self):
-        # Solving the task writes done.txt into a temp copy, never the fixture.
         marker = os.path.join(FIXTURES_DIR, "write-marker", "workspace", "done.txt")
         self._run("fake_adapter")
         self.assertFalse(os.path.exists(marker),
