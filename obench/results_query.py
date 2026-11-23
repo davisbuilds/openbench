@@ -60,11 +60,8 @@ def cell_of(row):
 
 
 def is_judged(row):
-    # class_for_report, not the raw field: it corrects a stored exclusion the
-    # row's own fields refute (a 429 mid-run that did not stop the checker from
-    # reaching a verdict). Reading the raw field here would make this tool
-    # disagree with `obench report` on the same file, which is the exact
-    # inconsistency this module exists to remove.
+    # WHY: A checker verdict can supersede a stored exclusion. Use the same effective class as
+    # the report to keep coverage comparable.
     return class_for_report(row) not in EXCLUDED
 
 
@@ -176,9 +173,8 @@ def _warn_mixed_harness_versions(cells):
     gate cannot catch that, because each host was internally consistent; only a
     check at the point of COMPARISON can.
     """
-    # Grouped BY HARNESS: different harnesses legitimately have different CLI
-    # versions (pi 0.80.10 vs opencode 1.18.3 is not a skew, they are different
-    # tools). Only a version split WITHIN one harness confounds a comparison.
+    # WHY: Different tools have independent version schemes. Within-harness version changes
+    # are the ones that confound a comparison.
     by_harness = collections.defaultdict(dict)
     unknown = []
     for armname, byc in cells.items():
@@ -360,7 +356,8 @@ def main(argv=None):
                     help="report each input independently; never pool treatments")
     args = ap.parse_args(argv)
     groups = [[path] for path in args.paths] if args.separate_inputs else [args.paths]
-    # Validate every input before printing a partial report.
+    # WHY: Validate all inputs first so a late error cannot leave output that looks like a
+    # complete report.
     prepared = []
     for paths in groups:
         scope = load(paths)

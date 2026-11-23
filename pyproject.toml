@@ -22,7 +22,6 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Testing",
 ]
-# Stdlib-only runtime; no third-party dependencies.
 dependencies = []
 
 [project.urls]

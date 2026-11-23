@@ -85,8 +85,6 @@ def control_overlay(directory: Path, kind: str) -> None:
             rollout = replace_function(rollout, (buggy / "rollout_codex.py").read_text(),
                                        "surface_mismatch")
     else:
-        # Independent valid presentation: retain qualified multiset comparison,
-        # but show the legacy bare skill names in both diagnostic lists.
         for key, counter in (("only_in_recorded", "only_recorded"),
                              ("only_in_live", "only_live")):
             old = f'"{key}": sorted({counter}.elements()),'
@@ -158,8 +156,8 @@ def main() -> None:
                     "for p in r.rglob('*') if p.is_file()}))").stdout)
                 assert image_workspace == manifest(TASK / "environment/app"), "stale image workspace"
                 if kind == "deliberately-exposed-control":
-                    # The exact same denial instrument must reject an exposed
-                    # canary; a probe that always reports absence cannot pass.
+                    # WHY: A known exposed canary proves the denial detector can report a
+                    # positive.
                     run("docker", "exec", name, "mkdir", "-p", str(canary.parent))
                     run("docker", "cp", str(canary), name + ":" + str(canary))
                 probe = r'''
@@ -205,8 +203,8 @@ sys.exit(0 if all(checks.values()) else 1)
                     assert probe_checks["direct"] is False
                     assert probe_checks["symlink"] is False
                     assert probe_checks["subprocess"] is False
-                # Observe the successful write from the host, independently of
-                # the constrained process's claim that it could write/read it.
+                # WHY: Confirm the write from the host because the constrained process’s own
+                # claim cannot establish persistence.
                 observed = scratch / (kind + "-positive.txt")
                 run("docker", "cp", name + ":/app/probe-positive.txt", str(observed))
                 assert observed.read_text() == "workspace-write-control"
@@ -215,10 +213,9 @@ sys.exit(0 if all(checks.values()) else 1)
                            "mounts": inspect["Mounts"], "network": "none",
                            "positive_write_observed": True, "host_canary_unchanged": True}
                 if expected_pass:
-                    # This probe has no live harness or untrusted descendants.
-                    # Same-container injection is an offline task control only,
-                    # not proof of production agent/grader phase separation.
-                    # Reference oracle is a separate run, never an agent run.
+                    # WHY: Use the same-container injection only for the offline task control.
+                    # Validate grading phase separation with the separate runtime
+                    # evidence.
                     if kind == "reference":
                         run("docker", "cp", str(TASK / "solution"), name + ":/solution")
                         run("docker", "exec", name, "bash", "/solution/solve.sh")

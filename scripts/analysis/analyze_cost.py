@@ -51,41 +51,25 @@ import urllib.request
 from collections import defaultdict
 from typing import Optional
 
-# --- Price sheet -----------------------------------------------------------
-# Per-TOKEN USD prices. Keys are the bench `model` field (as it appears in rows).
-# OpenRouter snapshot fetched 2026-08-27 from https://openrouter.ai/api/v1/models
-# (prompt -> p_in, completion -> p_out, input_cache_read -> p_cache_read).
-# p_cache_write falls back to p_in when the endpoint omits it; our rows carry
-# cache_write == 0 so it is inert here regardless.
-#
-# Routing/tier is per obench/bridge/config.yaml:
-#   glm-5.3-flash            -> openrouter/z-ai/glm-5.3-flash            (PAID)
-#   deepseek-v4-flash-0731   -> openrouter/deepseek/deepseek-v4-flash-0731 (PAID)
-#   minimax-m3               -> openrouter/minimax/minimax-m3            (PAID, not :free)
-#   ox-alpha                 -> openrouter/stealth/ox-alpha             (FREE preview, retired)
+# WHY: Keep the historical price snapshot so costs can be reproduced against the same provider
+# rates. Missing cache-write prices use the input rate only for the fallback estimate.
 PRICES: dict[str, Optional[dict]] = {
     "glm-5.3-flash":          {"in": 7.5e-8, "cache_read": 1.5e-8, "cache_write": 7.5e-8, "out": 2.5e-7, "src": "openrouter:z-ai/glm-5.3-flash@2026-08-27"},
     "deepseek-v4-flash-0731": {"in": 6.0e-8, "cache_read": 1.2e-8, "cache_write": 6.0e-8, "out": 1.2e-7, "src": "openrouter:deepseek/deepseek-v4-flash-0731@2026-08-27"},
     "minimax-m3":             {"in": 3.0e-7, "cache_read": 6.0e-8, "cache_write": 3.0e-7, "out": 1.2e-6, "src": "openrouter:minimax/minimax-m3@2026-08-27"},
     "ox-alpha":               {"in": 0.0,    "cache_read": 0.0,    "cache_write": 0.0,    "out": 0.0,    "src": "openrouter:stealth/ox-alpha (free preview)"},
-    # codex-native arms ran on a ChatGPT subscription (flat fee), but OpenRouter
-    # publishes OpenAI's per-token API list price for the SAME base models, so
-    # these are the authoritative "what it would have cost on the metered API"
-    # figures. The -xhigh/-max suffixes are reasoning-effort settings, not price
-    # tiers -- price is per base model (codex ran `-m gpt-5.6-terra`/`-m gpt-5.6-luna`).
+    # WHY: The native arms ran on a subscription. API list prices estimate a separate metered
+    # treatment, and reasoning-effort suffixes share the base model rate.
     "gpt-5.6-terra-xhigh":    {"in": 2.0e-6, "cache_read": 2.0e-7, "cache_write": 2.0e-6, "out": 1.2e-5, "src": "openrouter:openai/gpt-5.6-terra@2026-08-27 (theoretical API list price)"},
     "gpt-5.6-luna-max":       {"in": 2.0e-7, "cache_read": 2.0e-8, "cache_write": 2.0e-7, "out": 1.2e-6, "src": "openrouter:openai/gpt-5.6-luna@2026-08-27 (theoretical API list price)"},
 }
 
-# bench model -> OpenRouter model id, for --refresh-prices (and their tier).
 OPENROUTER_SLUG = {
     "glm-5.3-flash":          "z-ai/glm-5.3-flash",
     "deepseek-v4-flash-0731": "deepseek/deepseek-v4-flash-0731",
     "minimax-m3":             "minimax/minimax-m3",
-    # codex-native: OpenRouter lists OpenAI's list price for the same base models.
     "gpt-5.6-terra-xhigh":    "openai/gpt-5.6-terra",
     "gpt-5.6-luna-max":       "openai/gpt-5.6-luna",
-    # ox-alpha stealth route is retired/unlisted -> stays free (0).
 }
 
 
@@ -193,8 +177,6 @@ def analyze(paths: list[str]) -> int:
                 if isinstance(r.get("cost_usd"), (int, float)) and not isinstance(r.get("cost_usd"), bool)
             )
             if all(v is None for v in row_costs):
-                # No captured cost on any row, and no price-sheet entry to
-                # derive from -- genuinely unknown, never fabricated.
                 cost_str = "UNKNOWN"
                 unknown_models.add(model)
             else:
@@ -203,7 +185,7 @@ def analyze(paths: list[str]) -> int:
                 grand_known += c
                 cost_str = f"${c:,.4f}"
                 if any(v is None for v in row_costs):
-                    cost_str += "*"  # partial: some cells neither captured nor priced
+                    cost_str += "*"
                 elif captured:
                     cost_str += f" ({captured} captured)"
             print(f"    {model:<26} {len(mr):>5} {in_unc:>9,} {cache_rd:>9,} {out:>8,} {reason:>7,}  {cost_str:>12}")
@@ -226,31 +208,24 @@ def analyze(paths: list[str]) -> int:
 
 
 def _selftest() -> int:
-    # Known tiers x known prices -> hand-computed expectation.
     price = {"in": 1e-6, "cache_read": 1e-7, "cache_write": 5e-7, "out": 2e-6}
     row = {"tokens_input_uncached": 1000, "tokens_cache_read": 5000,
            "tokens_cache_write": 0, "tokens_output": 200, "tokens_reasoning": 50}
     got = row_cost(row, price)
     exp = 1000*1e-6 + 5000*1e-7 + 0*5e-7 + (200+50)*2e-6
     assert abs(got - exp) < 1e-12, (got, exp)
-    # None-token fields must coerce to 0, not crash.
     assert row_cost({"tokens_output": None}, price) == 0.0
-    # reasoning is billed at the output rate.
     r2 = {"tokens_output": 0, "tokens_reasoning": 100}
     assert abs(row_cost(r2, price) - 100*2e-6) < 1e-12
 
-    # A row's captured (authoritative) cost_usd wins over price-sheet
-    # derivation, even when the derived figure would differ.
     captured_row = {"tokens_input_uncached": 1000, "tokens_output": 200, "cost_usd": 0.0042}
     assert effective_row_cost(captured_row, price) == 0.0042
-    # cost_usd == 0.0 is a legitimate captured value (e.g. a free-tier
-    # route) and must not be treated as falsy/absent.
+    # WHY: A free route can report an authoritative zero cost. Treating it as absent would
+    # replace evidence with an estimate.
     free_row = {"tokens_input_uncached": 1000, "tokens_output": 200, "cost_usd": 0.0}
     assert effective_row_cost(free_row, price) == 0.0
-    # Absent cost_usd falls back to price-sheet derivation.
     derived_row = {"tokens_input_uncached": 1000, "tokens_output": 200}
     assert abs(effective_row_cost(derived_row, price) - row_cost(derived_row, price)) < 1e-12
-    # No captured cost and no price-sheet entry -> None (UNKNOWN), never fabricated.
     assert effective_row_cost(derived_row, None) is None
 
     print("selftest OK")
@@ -281,8 +256,6 @@ def main() -> int:
         for model, p in overlay.items():
             PRICES[model] = {**p, "src": f"user:{args.codex_prices}"}
 
-    # Resolve inputs to results.jsonl file paths (recursive: catches nested
-    # sets like results/gate/solo/).
     inputs = args.paths or sorted(os.path.dirname(p) for p in glob.glob("results/**/results.jsonl", recursive=True))
     resolved = []
     for p in inputs:

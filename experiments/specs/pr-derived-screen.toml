@@ -1,9 +1,6 @@
-# Native compatibility calibration, separate from canonical Harbor suites.
-# Candidate screening only: no frontier difficulty claim until fresh repeats.
-# Run serially on one host after dependency/polarity checks and live auth smoke.
-# Current preparation uses the MacBook, Codex 0.154.0, post-HOME-fix adapter.
-# Private-source tasks are intentionally absent from this public spec.
-# Never reuse this result directory after changing task/adapter/runtime bytes.
+# WHY: Treat this as compatibility screening because the native route and single repetition
+# cannot establish frontier difficulty. Allocate a new result directory if execution
+# bytes change.
 
 results_path = "../../results/pr-derived-screen-v1/results.jsonl"
 ledger_dir = "../../results/pr-derived-screen-v1/ledger"

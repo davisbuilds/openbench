@@ -312,8 +312,8 @@ class Review:
                 result['value']['screenshot'] = stem + '.png'
                 result['value']['screenshot_sha256'] = digest(png)
             elif command['action'] in ('reset', 'viewport'):
-                # The browser may have applied only part of a state transition.
-                # No subsequent observation can claim a known selection.
+                # WHY: An interrupted browser action can still change the page. Subsequent
+                # observations cannot establish its previous selection.
                 self.failed = True
             confirmed = not self.failed
             record = {'schema': SCHEMA, 'seq': self.seq, 'unscored': True, 'request': request,

@@ -272,7 +272,7 @@ def convert(slug):
     spec = REGISTRY[slug]
 
     data_url, data_text = fetch(slug, "canonical-data.json")
-    desc_url = fetch_description(slug)  # fetched for provenance/audit only
+    desc_url = fetch_description(slug)  # WHY: Record the upstream data fetch for audit provenance.
     canonical = json.loads(data_text)
     cases = build_cases(slug, spec, canonical)
 

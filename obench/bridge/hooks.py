@@ -83,7 +83,6 @@ def sanitize_input(data):
     if not isinstance(inp, list):
         return data
 
-    # Index tool outputs by call_id so each call can be paired adjacently.
     outputs = {}
     for it in inp:
         if isinstance(it, dict) and it.get("type") == "function_call_output":
@@ -97,12 +96,9 @@ def sanitize_input(data):
         if _is_noise(it):
             continue
         if isinstance(it, dict) and it.get("type") == "function_call_output":
-            # Emitted right after its call below; skip here to avoid duplication
-            # (only skip once per call_id in case of odd repeats).
             cid = it.get("call_id")
             if cid in emitted_outputs:
                 continue
-            # Orphan output with no preceding call: keep it in place.
             result.append(it)
             continue
         result.append(it)
@@ -157,8 +153,8 @@ def normalize_thinking(data):
     """
     model = _model_key(data.get("model"))
     if model == "claude-opus-4-8":
-        # Anthropic/LiteLLM accepts the portable Responses reasoning field;
-        # keep codex's medium request explicit for frontier parity.
+        # WHY: Keep the requested reasoning tier explicit to compare Responses clients on the
+        # same setting.
         data["reasoning"] = {"effort": "medium"}
         data["reasoning_effort"] = "medium"
         _merge_extra_body(data, {"reasoning_effort": "medium"})
@@ -166,7 +162,8 @@ def normalize_thinking(data):
         data["thinking"] = {"type": "enabled", "clear_thinking": False}
         data["reasoning"] = {"effort": "high"}
         data["reasoning_effort"] = "high"
-        # Z.ai exposes high/max; high is the closest medium-equivalent.
+        # WHY: The upstream tier choices lack medium. High supplies the supported thinking
+        # route.
         _merge_extra_body(data, {"thinking": data["thinking"], "reasoning_effort": "high"})
     elif model == "glm-4.7-flash":
         data["thinking"] = {"type": "enabled", "clear_thinking": False}
@@ -175,17 +172,13 @@ def normalize_thinking(data):
         data.pop("reasoning_effort", None)
     elif model == "deepseek-v4-flash":
         data["thinking"] = {"type": "enabled"}
-        # DeepSeek's LiteLLM chat adapter explicitly supports top-level
-        # `thinking`; do not duplicate it in extra_body, which bypasses the
-        # adapter's reasoning_content preservation path.
-        # DeepSeek V4 Flash has high/max but no medium; do not send codex's
-        # medium string upstream as a level. The thinking object requests the
-        # vendor's default thinking-on behavior.
+        # WHY: Send the thinking field through the adapter so it can preserve reasoning
+        # content. The upstream route has no medium tier.
         data.pop("reasoning", None)
         data.pop("reasoning_effort", None)
     elif model == "kimi-k2.7-code":
-        # Moonshot Kimi reasoning models use DeepSeek-style thinking controls on
-        # the OpenAI-compatible endpoint. No portable medium effort is exposed.
+        # WHY: The OpenAI-compatible Moonshot route accepts thinking controls without a medium
+        # reasoning tier.
         data["thinking"] = {"type": "enabled"}
         _merge_extra_body(data, {"thinking": data["thinking"]})
         data.pop("reasoning", None)
@@ -382,7 +375,6 @@ _patch_deepseek_thinking_gate()
 
 class ReasoningStripper(CustomLogger):
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
-        # call_type is "responses"/"aresponses" for the /v1/responses endpoint.
         normalize_thinking(data)
         if "input" in data:
             sanitize_input(data)

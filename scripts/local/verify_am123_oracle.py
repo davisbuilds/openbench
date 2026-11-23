@@ -20,8 +20,8 @@ def source(variant, *, root=CASE):
     if variant not in ('buggy','partial','reference'):
         raise ValueError('only pinned control snapshots are supported')
     manifest = json.loads((root/'SOURCE_MANIFEST.json').read_text())
-    # Read once, validate the complete inventory, and pass those same bytes on.
-    # This driver is not an authority boundary for editable model submissions.
+    # WHY: Validate the snapshot inventory once and pass those exact observed bytes on to the
+    # fixed controls.
     snapshots = {name:read_tree(root/name) for name in ('source','partial','reference')}
     captured = {name+'/'+path:data for name,files in snapshots.items() for path,data in files.items()}
     if set(captured) != set(manifest['files']):

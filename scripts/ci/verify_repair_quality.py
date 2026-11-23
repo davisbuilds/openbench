@@ -96,8 +96,8 @@ def main():
     with Operation(output/'admission', 'admission-ci') as evidence:
         evidence.finish(rv.validate_receipt(quality, task, args.runtime_image, evidence=evidence))
 
-    # A genuinely failed production control is rewritten to claim it passed;
-    # hashes and specification stay consistent. Only fresh replay can reject it.
+    # WHY: A negative control with consistent seals must still fail fresh replay, so integrity
+    # checks alone cannot prove the claimed outcome.
     failed_spec = copy.deepcopy(spec)
     broken = output/'broken-reference'
     shutil.copytree(output/'skill-defect', broken)
@@ -159,7 +159,6 @@ def main():
             require(all(c['pass'] for c in checks) if name in ('reference', 'alternative') else any(not c['pass'] for c in checks),
                     'seeded invariant polarity failed: ' + name)
             variation_reports.append({'source': name, 'seed': seed, 'worker': worker, 'checks': checks})
-    # Exercise both exception protocols in real workers, including operation ID.
     files = rv.source_files(output/'reference', rv.inspect_task(task))
     python_errors, _ = legacy.run_worker(args.runtime_image, archive(files), [{'op': 'unknown-ci-operation'}])
     require(python_errors[0]['error']['operation'] == 'unknown-ci-operation', 'Python diagnostic missing')

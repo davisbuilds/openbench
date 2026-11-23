@@ -1,9 +1,5 @@
-# Laguna / Inkling — equifinality experiment equivalent to run_mini_phase2.sh
-#
-# Arms: pi on laguna-s-2.1, aider on inkling
-# Tasks: make-it-run (smoke), hello-world, fibonacci
-# Retry budgets: infra=2, stalled=1, rate_limited=3 with exponential backoff
-# Running: obench matrix --spec experiments/specs/laguna-inkling.toml
+# WHY: Keep the phase-two trial grouping so the matrix can reproduce the earlier two-harness
+# comparison.
 
 results_path = "results/laguna-inkling.jsonl"
 ledger_dir = "ledgers/laguna-inkling"

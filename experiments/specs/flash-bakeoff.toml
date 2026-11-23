@@ -1,22 +1,6 @@
-# Flash-model coding bake-off (paid, ZDR-compliant, unthrottled).
-#
-# All three arms route through the bridge to OpenRouter PAID endpoints, which
-# OpenRouter serves via zero-retention providers -- so they pass a ZDR guardrail
-# and, being paid, are free of the free-tier daily caps and 429 throttling that
-# strangled the earlier free-stealth runs. None of this touches codex quota.
-#
-#   glm-5.3-flash            = the model formerly served as free "stealth/ox-alpha"
-#                              (identity disclosed when the stealth window closed)
-#   minimax-m3               = MiniMax M3 (paid, CoreWeave)
-#   deepseek-v4-flash-0731   = DeepSeek V4 Flash 0731 (paid, OpenInference)
-#
-# Full task set INCLUDING webcore -- it only ever failed under free-tier
-# throttling; on the paid endpoint it has the runway to complete.
-#
-#   obench matrix --spec experiments/specs/flash-bakeoff.toml
+# WHY: Use qualified paid routes to separate task capability from free-tier throttling, with
+# the required retention policy on every route.
 
-# Config-level suite slug -> row `suite`, and the base of the per-run `study`
-# id (`{name}-{launch-date}`). Defaults to the spec filename stem if omitted.
 name = "flash-bakeoff"
 results_path = "../../results/flash-bakeoff/results.jsonl"
 ledger_dir = "../../results/flash-bakeoff/ledger"
@@ -25,13 +9,10 @@ exec_mode = "local"
 trials = 3
 allow_version_drift = true
 max_consecutive_excluded = 4
-# ~2x timeout: exhaust a throttle-dominated (full-timeout-burn) cell after ~2
-# attempts instead of re-burning the timeout across the retry budget. (Paid
-# endpoints here rarely throttle, but keep the guard as a standing default.)
+# WHY: Preserve the wall limit even on paid routes so a prolonged provider disruption cannot
+# consume the retry budget in full.
 max_cell_wall_s = 3600
 
-# Paid endpoints rarely throttle; keep retries low so a genuine failure is
-# scored rather than looped.
 [retry]
 infra = 2
 stalled = 1

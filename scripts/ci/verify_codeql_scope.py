@@ -68,8 +68,8 @@ def verify_archive(database, language, root):
             if name.startswith(prefix):
                 repository_files.add(name[len(prefix):])
             else:
-                # Extractors may archive external libraries as well as this
-                # checkout. Do not confuse them with repository-relative names.
+                # WHY: An extractor can archive external dependencies alongside the checkout.
+                # Those paths do not establish repository coverage.
                 external_files += 1
     if not repository_files:
         raise ValueError('source archive has no paths rooted at checkout: ' + str(root))

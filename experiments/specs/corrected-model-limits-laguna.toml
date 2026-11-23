@@ -1,17 +1,5 @@
-# Re-run laguna-s-2.1 under the CORRECTED model limits (commit 4a3a7e6).
-#
-# Its previous results were produced with invented limits: the provider config
-# fell back to 128000/8192 (deepseek) or free-tier numbers (laguna) instead of
-# the real values now pinned in data/model_limits.json. That is not cosmetic --
-# pi clamps every request to min(maxTokens, max(1, contextWindow - prompt -
-# 4096)), so laguna had a reply cut off at its cap on ~57% of cells and
-# deepseek's budget collapsed to 1 token on 19 long-horizon cells.
-#
-# Deliberately NOT seeded from prior results: the old rows were measured under
-# different limits, so they are not comparable and must not be reused.
-#
-# Two task groups because TB-7 spans both lanes: the synthetic tasks run local,
-# the terminal-bench tasks run in docker.
+# WHY: Use a fresh result file because earlier rows used provider limits that changed reply
+# truncation.
 results_path = "../../results/rerun-laguna/rerun.jsonl"
 ledger_dir = "../../results/rerun-laguna/ledger"
 timeout = 2400

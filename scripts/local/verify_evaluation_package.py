@@ -55,7 +55,8 @@ async def verify(archive, sha256, image, output, *, trust_evaluator=False):
                 export_task(approved, task)
                 environment = task / 'environment'
                 extra = pin(archive, sha256, True).kwargs()
-            # A positive host read of the exact forbidden target precedes denial.
+            # WHY: Prove the exact target is readable from the host before interpreting a
+            # denied read from the solver.
             if hashlib.sha256(archive.read_bytes()).hexdigest() != sha256:
                 raise ValueError('host archive detector failed')
             reports = []

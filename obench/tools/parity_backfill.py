@@ -33,12 +33,8 @@ GROKBUILD = "grokbuild"
 VENDOR_SPLIT = "vendor_split"
 UNAVAILABLE = "unavailable"
 SCALAR_EXACT = "scalar_exact"
-# Lanes whose legacy 'tokens' scalar is already uncached_input + output, so the
-# scalar can be adopted as tokens_fresh when the transcript is unavailable:
-# pi verified exact by the parity probe (zero delta vs bridge ground truth) and
-# by this tool's own self-test; grokbuild computes the scalar from per-call
-# inference_done events with the same formula. claude/codex scalars use other
-# bases and must NEVER be adopted.
+# WHY: Only these adapters already define their legacy scalar on the fresh-token basis, so
+# other scalar values cannot replace missing splits.
 SCALAR_EXACT_HARNESSES = {"pi", GROKBUILD}
 
 
@@ -73,10 +69,8 @@ def _empty_usage() -> dict[str, Any]:
 
 
 def _fresh_from_usage(usage: dict[str, Any]) -> int | None:
-    # Delegated backfill contract: tokens_fresh is the cross-harness comparable
-    # scalar used for this dataset and is exactly uncached input + output. Cache
-    # writes stay in their split field and are used only for Claude legacy-scalar
-    # reconciliation below, not folded into tokens_fresh.
+    # WHY: Keep cache writes out of the cross-harness fresh token measure to preserve its
+    # comparison basis.
     inp = _int_or_none(usage.get("tokens_input_uncached"))
     out = _int_or_none(usage.get("tokens_output"))
     if inp is None or out is None:

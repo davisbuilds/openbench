@@ -23,7 +23,7 @@ def classify(repo, event, base=None, head=None, merged=None):
         return dict(report, mode='classified', decisions=decisions,
                     lanes=[lane for lane in inputs.LANES if decisions[lane]['run']])
     except Exception as error:
-        # An incomplete comparison never becomes a partial or empty matrix.
+        # WHY: An incomplete comparison cannot reliably identify which lanes are safe to skip.
         return dict(report, mode='fallback', reason=f'{type(error).__name__}: {error}')
 
 
@@ -57,7 +57,6 @@ def validate_gate(report, event, classify_result, integration_result):
 
 
 def output_decision(report, output, summary):
-    # Keep the gate payload bounded; detailed path evidence stays in the log.
     compact = {key: report[key] for key in ('event', 'mode', 'lanes')}
     if report['mode'] == 'classified':
         compact['decisions'] = {lane: {'run': item['run']}
@@ -66,7 +65,7 @@ def output_decision(report, output, summary):
         with open(output, 'a') as stream:
             stream.write('decision=' + json.dumps(compact, separators=(',', ':')) + '\n')
             stream.write('run=' + ('true' if report['lanes'] else 'false') + '\n')
-            # GitHub rejects an empty matrix even on some skipped-job paths.
+            # WHY: GitHub can reject empty matrices even on a job that later skips.
             stream.write('matrix=' + json.dumps(report['lanes'] or ['not-selected']) + '\n')
     if summary:
         with open(summary, 'a') as stream:

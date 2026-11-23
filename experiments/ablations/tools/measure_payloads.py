@@ -28,7 +28,8 @@ def tokens(text: str) -> int:
         return 0
     if _enc is not None:
         return len(_enc.encode(text))
-    # Rough tiktoken-style fallback: words, numbers, and punctuation chunks.
+    # WHY: The exact tokenizer is optional. The fallback reports an approximate method so its
+    # counts can be kept separate.
     return len(re.findall(r"\w+|[^\w\s]", text, flags=re.UNICODE))
 
 
