@@ -42,14 +42,11 @@ from .paths import PACKAGE_DIR, SOURCE_ROOT, default_results_path, default_tasks
 HERE = PACKAGE_DIR
 REPO = SOURCE_ROOT
 
-# Invoke the runner as a MODULE, not a file path: obench/run.py uses relative
-# imports, so `python3 obench/run.py` dies with "attempted relative import
-# with no known parent package" (observed on first live queue use).
+# WHY: Invoke the runner as a module so its relative imports resolve.
 DEFAULT_RUNNER_MODULE = "obench.run"
 DEFAULT_MAX_CONSECUTIVE_EXCLUDED = 5
 POLL_INTERVAL_S = 2.0
 
-# Retry budgets: how many times a cell with a given failure class is re-queued.
 DEFAULT_RETRY: dict[str, int] = {
     "infra": 2,
     fc_mod.STALLED: 1,
@@ -189,10 +186,6 @@ def resolve_groups(
             "tasks": list(tg.get("tasks", [])),
             "tasks_dir": resolve_group_tasks_dir(tg, spec, spec_dir),
             "exec_mode": tg.get("exec_mode") or default_exec_mode,
-            # Per-group timeout override (None -> use the spec-global timeout).
-            # A small algorithmic task and a large agentic task in the same spec
-            # need very different budgets; one global timeout either starves the
-            # big task or wastes wall-time on a hung small one.
             "timeout": tg.get("timeout"),
         })
     return groups
@@ -316,19 +309,15 @@ def derive_study_identity(
     Deleting/resetting the queue state starts a new run, which is the intended way
     to begin one.
     """
-    # Reuse the campaign's persisted identity regardless of which variant spec is
-    # driving this invocation -- the shared queue state, not the filename, defines
-    # the run. (Codex PR #2 P1: keying reuse on the spec name split am-consistency
-    # variants across two study_sha256 values and broke the intended frontier.)
+    # WHY: Changing the variant spec on resume must not split a campaign across study keys.
     persisted = state.get("study_identity")
     if isinstance(persisted, dict) and persisted.get("study_sha256"):
         return persisted["suite"], persisted["study"], persisted["study_sha256"]
 
     suite = spec.get("name") or (Path(spec_path).stem if spec_path else "study")
     launched = time.time()
-    # Local date for the human-readable label, to match the operator's dated
-    # output-dir convention; the epoch `launched` in the digest below stays
-    # timezone-independent, and study_sha256 is the exact key regardless.
+    # WHY: The label follows the local output-directory date. The digest uses an epoch
+    # timestamp for exact identity.
     launch_date = time.strftime("%Y-%m-%d", time.localtime(launched))
     nonce = uuid.uuid4().hex
     study = f"{suite}-{launch_date}"
@@ -405,16 +394,11 @@ class ArmState:
         self.budgets: dict[str, int] = dict(retry_budgets or DEFAULT_RETRY)
         self.consecutive_excluded = 0
         self.paused = False
-        # A SET, not a counter: an incrementing int carried across resumes
-        # double-counted cells re-verified in a later pass and printed
-        # coverage above 100% (observed: 'Total: 4/2 satisfied'). Coverage
-        # is a property of WHICH cells have verdicts, so store which.
+        # WHY: Resume can verify a cell again. Counting observations would report coverage
+        # over 100%.
         self.satisfied_cells: set[str] = set()
         self.planned = 0
         self.exhausted_cells: list[str] = []
-        # A harness/config error: the runner exited nonzero and wrote no row at
-        # all. Distinct from an exhausted retry budget -- it means the arm is
-        # mis-wired, so we stop it and surface the reason instead of retrying.
         self.config_error: str | None = None
 
     @property
@@ -483,9 +467,8 @@ class ArmState:
     def from_dict(
         cls, d: dict[str, Any], retry_budgets: dict[str, int] | None = None,
     ) -> "ArmState":
-        # The active spec is authoritative on resume. Without an explicit
-        # override, normalize old persisted ``stall`` keys for standalone
-        # callers loading legacy queue state.
+        # WHY: Use the current spec on resume. Standalone callers still load state written
+        # with the old stall key.
         budgets = (
             dict(retry_budgets)
             if retry_budgets is not None
@@ -540,11 +523,8 @@ def cell_is_satisfied(row: dict[str, Any] | None) -> bool:
     """A cell is SATISFIED when it has a row whose failure_class is NOT excluded."""
     if row is None:
         return False
-    # class_for_report unconditionally: `row.get("failure_class") or ...`
-    # short-circuited on any stored value, so a cell stored as rate_limited was
-    # re-queued even when the row's own fields prove the checker reached a
-    # verdict (a 429 that recovered mid-run). That burns provider quota re-running
-    # cells that are already judged -- 2 of the 7 laguna tb-mid "gaps" were this.
+    # WHY: A run can recover from a rate limit before the checker runs. Reclassify
+    # its final row to avoid rerunning a judged cell.
     fc = fc_mod.class_for_report(row)
     return fc not in fc_mod.EXCLUDED_FROM_SOLVE_RATE
 
@@ -656,8 +636,8 @@ def decide_cell_outcome(
                             f"coverage {arm_state.satisfied}/{arm_state.planned}")
 
     if row is None:
-        # Runner exited without writing any row: a mis-wired arm, not a retry
-        # case. The shell surfaces the stderr reason and stops the arm.
+        # WHY: Without a result row there is no trial outcome to classify. Retrying a broken
+        # arm would consume the whole budget.
         return CellDecision("config_error", None, prior_attempt, f"runner exit={rc}")
 
     new_fc = row_failure_class(row)
@@ -678,8 +658,6 @@ def decide_cell_outcome(
             arm_state.exhausted_cells.append(run_id)
         return CellDecision("exhausted", new_fc, new_retry, "retry budget exhausted")
 
-    # Present row, not satisfied, non-excluded class: unreachable in practice
-    # (not-satisfied implies an excluded class), preserved as a no-op.
     return CellDecision("scored", new_fc, new_retry, "")
 
 
@@ -720,12 +698,10 @@ def build_runner_command(
     """
     effective_tasks_dir = cell.get("tasks_dir", tasks_dir)
     effective_exec_mode = cell.get("exec_mode", exec_mode)
-    # A cell carrying its own timeout (from a task group's override) wins over
-    # the spec-global default; None/0 falls back to the caller's timeout.
     effective_timeout = cell.get("timeout") or timeout
     cmd = [sys.executable, "-m", DEFAULT_RUNNER_MODULE]
     cmd.extend([
-        "--force",  # always re-run even if run_id exists (prior excluded rows)
+        "--force",  # WHY: An existing run ID can belong to an excluded attempt, which the child must rerun when the queue retries.
         "--harness", cell["harness"],
         "--model", cell["model"],
         "--task", cell["task"],
@@ -735,9 +711,6 @@ def build_runner_command(
     ])
     if effective_tasks_dir:
         cmd.extend(["--tasks-dir", effective_tasks_dir])
-    # Comparison identity: the per-run study id (+ exact key) and config-level
-    # suite slug, stamped verbatim into every row so a downstream frontier can
-    # group one bake-off's cells without parsing the results directory name.
     if study:
         cmd.extend(["--study", study])
     if study_sha256:
@@ -747,21 +720,11 @@ def build_runner_command(
     if effective_exec_mode == "docker":
         cmd.extend(["--exec", "docker"])
     if allow_version_drift:
-        # Uniform waiver across every arm: a local run against a host CLI newer
-        # than the Dockerfile pin. Each row records version_drift=true, so the
-        # off-pin state is annotated rather than silently bumping the pin (which
-        # is coupled to tests, docker image-contexts, and docs).
         cmd.append("--allow-version-drift")
     if stall_timeout is not None:
         cmd.extend(["--stall-timeout", str(stall_timeout)])
-    # The counting proxy backs two independent needs: stall-kill (it interrupts
-    # a stalled call) and authoritative cost capture (it reads usage.cost off
-    # each call). A stall run wants both, so --proxy (which also arms the 600s
-    # watchdog downstream). A cost-only run wants metering WITHOUT the watchdog
-    # -- --capture-cost starts the same proxy but never imposes a stall timeout,
-    # so a legitimately long-thinking cell is not killed. Emitting --proxy here
-    # for cost-only would silently re-arm the watchdog (run.py forces a 600s
-    # stall on any --proxy).
+    # WHY: The runner arms a watchdog for --proxy. Cost-only capture uses the proxy without
+    # interrupting long calls.
     if stall_timeout is not None:
         cmd.append("--proxy")
     elif capture_cost:
@@ -796,11 +759,11 @@ def run_runner(cmd: list[str], timeout_s: float | None = None) -> tuple[int, str
             rc = proc.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
             try:
-                os.killpg(proc.pid, 15)  # SIGTERM
+                os.killpg(proc.pid, 15)
                 proc.wait(timeout=5)
             except (ProcessLookupError, subprocess.TimeoutExpired):
                 try:
-                    os.killpg(proc.pid, 9)  # SIGKILL
+                    os.killpg(proc.pid, 9)
                 except ProcessLookupError:
                     pass
                 proc.wait()
@@ -857,13 +820,10 @@ class _MatrixContext:
         self.arm_states = arm_states
         self.retry_counts = retry_counts
         self.state = state
-        # Per-arm queues, so each drain mutates only its own arm's lists while a
-        # save() aggregates all arms into the single persisted `pending`.
         self.arm_pending = arm_pending
         self.arm_paused = arm_paused
         self.direct_write = direct_write
-        # Reentrant so a drain can hold the lock across its bookkeeping and still
-        # call the helper methods below (which each re-acquire it).
+        # WHY: A worker may hold this lock while calling helpers that acquire it again.
         self.lock = threading.RLock()
 
     def snapshot(self):
@@ -891,9 +851,6 @@ class _MatrixContext:
             if rows:
                 with open(self.results_path, "a", encoding="utf-8") as dst:
                     dst.write(rows)
-            # Remove the part file AND the sibling lock file the child runner
-            # creates next to any --results-path (run.py: <path>.lock), so a
-            # parallel run doesn't leave an empty .lock per arm behind.
             for stale in (part_path, part_path + ".lock"):
                 try:
                     os.remove(stale)
@@ -941,15 +898,12 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
     paused = ctx.arm_paused[arm_name]
     visit_paused = False
     part_path = _arm_part_path(ctx.results_path, arm_name)
-    # Resume salvage: fold in (and clear) any part file a prior kill stranded for
-    # this arm BEFORE the first satisfaction check, so a completed-but-unmerged
-    # cell is seen as done rather than re-run. No-op under direct_write.
+    # WHY: Merge stranded part files before checking coverage so a completed cell is not run
+    # again.
     if not ctx.direct_write:
         ctx.merge_part(part_path)
 
     while True:
-        # Pick the next cell under the lock: revisiting paused cells and popping
-        # both mutate this arm's shared queue view.
         with ctx.lock:
             if not pending and paused and not visit_paused:
                 print(f"\n-- {arm_name}: revisiting {len(paused)} paused cell(s) --")
@@ -961,8 +915,6 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
             arm_nm, arm_idx, cell = pending.pop(0)
             run_id = cell["run_id"]
 
-            # Pre-run satisfaction / retry-budget check (reads the shared results
-            # snapshot; records verdicts on this arm's ArmState).
             existing, result_attempt_counts = load_results_snapshot(ctx.results_path)
             row = existing.get(run_id)
             if cell_is_satisfied(row):
@@ -970,10 +922,8 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
                 print(f"    SATISFIED {run_id} (coverage {as_.satisfied}/{as_.planned})")
                 ctx.save()
                 continue
-            # A restored queue must enforce the cumulative cap before another
-            # retry or backoff. Part-file salvage above is already merged into
-            # this ledger, and the shared lock keeps reads/state updates atomic
-            # with respect to other arm workers. Fresh cells still run once.
+            # WHY: A resumed cell may already have used its entire wall budget. Check its
+            # merged ledger before another attempt.
             if row is not None and ctx.max_cell_wall_s is not None:
                 cell_wall = load_cumulative_wall(ctx.results_path).get(run_id, 0.0)
                 if wall_cap_exceeded(cell_wall, ctx.max_cell_wall_s):
@@ -994,7 +944,6 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
                 ctx.save()
                 continue
 
-        # Backoff and the cell run itself stay OUTSIDE the lock so arms overlap.
         if attempt > 0:
             delay = backoff_for_failure(fc, attempt, ctx.rate_limited_backoff)
             print(f"    BACKOFF {run_id} attempt={attempt}/{budget} fc={fc} wait={delay:.0f}s")
@@ -1002,13 +951,12 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
 
         print(f"    RUN    {run_id}", flush=True)
         cell_timeout = cell.get("timeout") or ctx.timeout
-        # One worker -> child appends straight to the durable results file (no
-        # merge window). >1 worker -> arm-private part file, merged under the
-        # lock after the child exits, so concurrent children never interleave.
+        # WHY: Independent part files keep concurrent children from interleaving output.
+        # Serial runs can avoid the merge window.
         if ctx.direct_write:
             target = ctx.results_path
         else:
-            ctx.merge_part(part_path)  # ensure empty before the child writes
+            ctx.merge_part(part_path)
             target = part_path
         cmd = build_runner_command(
             cell, target, None, ctx.timeout, ctx.stall_timeout, ctx.exec_mode,
@@ -1019,8 +967,6 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
         if rc != 0:
             print(f"    WARN runner exit={rc} for {run_id}", file=sys.stderr)
 
-        # Post-run bookkeeping under the lock: merge the part, read the fresh
-        # snapshot, decide, apply the decision to the shared queue/state, save.
         with ctx.lock:
             if not ctx.direct_write:
                 ctx.merge_part(part_path)
@@ -1047,7 +993,7 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
                     print("    --- runner stderr (tail) ---", file=sys.stderr)
                     print(stderr_tail.rstrip(), file=sys.stderr)
                     print("    --- end runner stderr ---", file=sys.stderr)
-                pending.clear()   # a mis-wired arm: drop its remaining cells
+                pending.clear()
                 paused.clear()
             else:
                 ctx.retry_counts[run_id] = decision.new_retry_count
@@ -1066,8 +1012,6 @@ def _drain_arm(arm_name: str, ctx: _MatrixContext) -> None:
 
             ctx.save()
 
-    # Housekeeping: salvage/clear any part file left for this arm (no-op if the
-    # last cell already merged it, or under direct_write).
     if not ctx.direct_write:
         ctx.merge_part(part_path)
 
@@ -1080,27 +1024,16 @@ def run_matrix(
     timeout = spec.get("timeout", 2400)
     exec_mode = spec.get("exec_mode", "local")
     trials = spec.get("trials", 1)
-    # Cap the cumulative wall time a single cell may spend across retries. None
-    # (default) leaves retries bounded only by the per-class retry budget, which
-    # lets a throttle-dominated cell re-burn a full timeout on every re-queue.
     max_cell_wall_s = spec.get("max_cell_wall_s")
     allow_version_drift = bool(spec.get("allow_version_drift", False))
-    # Arm-level parallelism (default 1 = serial). Each worker drains one arm; the
-    # pool is capped at the number of active arms. Only sound for arms on
-    # DISTINCT providers -- co-scheduling arms that share a rate limit (or the
-    # one codex quota) re-creates the throttling this avoids. See BACKLOG #45.
+    # WHY: Arms that share a provider quota compete for the same rate limit even when the
+    # queue runs them independently.
     workers = int(spec.get("workers", 1) or 1)
     stall_timeout = spec.get("stall_timeout") or (
         int(os.environ.get("OPENBENCH_STALL_TIMEOUT", "0")) or None
     )
     if stall_timeout is None and spec.get("proxy", False):
         stall_timeout = DEFAULT_STALL_TIMEOUT
-    # Authoritative cost capture (usage.cost per call) runs through the counting
-    # proxy. It is opt-in per spec so ordinary runs don't pay the interception
-    # overhead. `proxy = true` (which forces a stall timeout above) also enables
-    # it; `capture_cost = true` enables the proxy for metering WITHOUT forcing a
-    # stall timeout. When neither is set, --proxy is not passed and open-model
-    # rows carry cost_usd = None (price-sheet derivation only).
     capture_cost = bool(spec.get("capture_cost", False))
     proxy_will_run = capture_cost or stall_timeout is not None
 
@@ -1119,9 +1052,6 @@ def run_matrix(
     arms = enumerate_arms(spec)
     all_cells = expand_cells_grouped(arms, groups, trials)
 
-    # Warn loudly if metering is off but open-model arms are present -- those
-    # rows will carry cost_usd = None (only subscription arms are None by
-    # design). Silent None is exactly what wasted the am-consistency cost axis.
     unmetered = unmetered_open_arms(arms, proxy_will_run)
     if unmetered:
         print(
@@ -1132,9 +1062,6 @@ def run_matrix(
             "Set `capture_cost = true` in the spec to meter them via the proxy."
         )
 
-    # Quick sanity check: only groups with a resolved tasks_dir can be checked
-    # here. Groups that omit tasks_dir defer resolution to the runner (config or
-    # discovery), so we can't pre-verify them and must not guess a path.
     missing: list[str] = []
     for group in groups:
         td = group.get("tasks_dir")
@@ -1152,11 +1079,8 @@ def run_matrix(
         )
         return 1
 
-    # ── Initialize queue state ──────────────────────────────────────────
-    # Resolve ledger_dir against the spec dir just like results_path. A bare
-    # relative ledger_dir was previously taken as-is (relative to CWD), so the
-    # persistent queue-state.json landed in a shared location and stale
-    # satisfied/planned counts from an unrelated run leaked back in on resume.
+    # WHY: Resolving a ledger against the working directory can load another campaign’s stale
+    # queue state.
     ledger_dir = spec.get("ledger_dir")
     if ledger_dir:
         qdir = os.path.abspath(os.path.join(spec_dir, str(ledger_dir)))
@@ -1166,12 +1090,8 @@ def run_matrix(
     os.makedirs(str(qdir), exist_ok=True)
     state = QueueState(queue_state_path)
 
-    # Mint (or, on resume, reuse) this campaign's study identity. Persisted in
-    # the queue state so every cell of one bake-off -- across resumes -- carries
-    # the same study id, while a fresh run gets a new one.
     suite, study, study_sha256 = derive_study_identity(spec, spec_path, state)
 
-    # Per-arm state (restored or fresh)
     arm_states_raw = state.get("arm_states", {})
     arm_states: dict[str, ArmState] = {}
     for arm in arms:
@@ -1184,21 +1104,12 @@ def run_matrix(
             as_.planned = sum(1 for c in all_cells if c["arm"] == name)
             arm_states[name] = as_
 
-    # Pending cell queue: list of (arm_name, cell) tuples.
-    # Restore from saved state if available.
     pending_raw = state.get("pending", [])
     by_run_id = {c["run_id"]: c for c in all_cells}
     if pending_raw:
         pending: list[tuple[str, int, dict[str, Any]]] = [
             (p[0], p[1], by_run_id[p[2]]) for p in pending_raw if p[2] in by_run_id
         ]
-        # A saved queue can name cells the CURRENT spec no longer contains --
-        # narrowing a spec (dropping a task group) while its ledger holds state
-        # is the normal way to refocus a campaign. The old code did
-        # next(c for c in all_cells if ...) and died on a bare StopIteration
-        # with no indication that the spec had changed. Drop the stale entries
-        # and say so; cells that are genuinely done are still skipped via the
-        # results file, which is the source of truth for completion.
         dropped = len(pending_raw) - len(pending)
         if dropped:
             print(f"  spec changed since the last run: dropping {dropped} queued "
@@ -1211,7 +1122,6 @@ def run_matrix(
     else:
         pending = [(c["arm"], c["arm_idx"], c) for c in all_cells]
 
-    # Track retry counts per run_id
     retry_counts: dict[str, int] = dict(state.get("retry_counts", {}))
 
     print(
@@ -1220,9 +1130,6 @@ def run_matrix(
     )
     print(f"  study={study} ({study_sha256[:12]}) suite={suite}")
 
-    # Partition the flat pending queue by arm. Arms are independent (a run_id
-    # encodes the model), so each arm drains its own list; a >1 worker pool runs
-    # arms concurrently. Order within an arm is preserved.
     arm_pending: dict[str, list] = {a: [] for a in arm_states}
     for entry in pending:
         arm_pending.setdefault(entry[0], []).append(entry)
@@ -1240,17 +1147,13 @@ def run_matrix(
         arm_paused=arm_paused,
         capture_cost=capture_cost,
         study=study, study_sha256=study_sha256, suite=suite,
-        # Single worker keeps the durable direct-to-results write; part files
-        # (with their merge window) are only needed to de-interleave >1 worker.
         direct_write=(n_workers == 1),
     )
 
     if n_workers > 1:
         print(f"  parallel: {n_workers} arm worker(s) over {len(active_arms)} active arm(s)")
-        # Throughput-only: the timing gate (BACKLOG #45) showed concurrent arms
-        # sharing the one LiteLLM bridge inflate per-cell t_agent_s on turn-heavy
-        # tasks. Coverage is unaffected; latency is. Warn so scored latency
-        # comparisons are not read off a parallel run by mistake.
+        # WHY: A shared proxy can inflate per-cell latency when arms overlap, making parallel
+        # timing unsuitable for scored comparisons.
         print("  WARNING: --workers is THROUGHPUT mode -- per-cell wall/agent "
               "time may be inflated by shared-bridge contention; do NOT use these "
               "runs for scored latency comparisons.", file=sys.stderr)
@@ -1261,12 +1164,11 @@ def run_matrix(
             for fut in _cf.as_completed(futures):
                 try:
                     fut.result()
-                except Exception as exc:  # collect ALL arm failures, not just the first
+                except Exception as exc:
                     arm = futures[fut]
                     errors.append((arm, exc))
                     print(f"  ERROR arm {arm!r} crashed: {exc!r}", file=sys.stderr)
             if errors:
-                # Surface the first as the cause so the traceback is preserved.
                 raise RuntimeError(
                     f"{len(errors)} arm worker(s) crashed: "
                     f"{', '.join(a for a, _ in errors)}") from errors[0][1]
@@ -1333,10 +1235,6 @@ def missing_task_images(spec, spec_dir, docker_runner=None):
     missing = []
     for group in spec.get("task_group") or []:
         tasks_dir = resolve_group_tasks_dir(group, spec, spec_dir)
-        # A group that omits tasks_dir defers resolution to the runner (config or
-        # discovery) and pins no per-task docker image, so there is nothing to
-        # preflight here. Skipping it also avoids os.path.join(None, ...), which
-        # otherwise crashes an entirely local spec before any cell runs.
         if tasks_dir is None:
             continue
         for task in group.get("tasks") or []:
@@ -1378,7 +1276,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.workers is not None:
-        spec["workers"] = args.workers  # CLI overrides the spec's `workers`
+        spec["workers"] = args.workers
 
     missing = missing_task_images(spec, spec_dir)
     if missing:

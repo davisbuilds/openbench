@@ -57,15 +57,12 @@ DEFAULT_MODEL = "gpt-5.5-medium"
 DEFAULT_IMAGE = "openbench-harness:latest"
 
 CHECKS = ("CLI", "VERSION", "AUTH", "MODEL")
-# Candidate-only checks appear in Details (and in the matrix when present).
 CANDIDATE_EXTRA_CHECKS = ("CONFIG", "ENV")
 
-# Docker-env check columns
 DOCKER_ENV_CHECKS = ("BUILDX", "CPUS", "MEMORY", "IMAGES", "AUTH")
 
-# M4 open canonical model -> the env key its provider needs. When --model is one
-# of these, the AUTH check becomes "is this key exported?" instead of the
-# harness's own subscription-login check. Mirrors the adapters' OPEN_MODELS.
+# WHY: Open-model routes authenticate with provider keys even on harnesses that also support
+# subscription login.
 OPEN_MODEL_ENV = {
     "glm-5.2": "ZAI_API_KEY",
     "glm-4.7-flash": "ZAI_API_KEY",
@@ -79,16 +76,10 @@ FRONTIER_MODEL_ENV = {
 }
 KEYS_ENV = "~/.openbench/keys.env"
 
-# Default env-requirements path
 ENV_REQUIREMENTS_PATH = ".openbench/env-requirements.toml"
-# Default packs dir for discovering per-task pinned images
 PACKS_DIR = os.path.join(".openbench", "packs")
 
 
-# --------------------------------------------------------------------------- #
-# Probes: every side effect goes through this object so tests can mock it all
-# and never touch the real CLIs, filesystem, or network.
-# --------------------------------------------------------------------------- #
 class Probes:
     """Real-world probes: subprocess, filesystem, adapter import."""
 
@@ -186,10 +177,6 @@ class Probes:
         return os.path.isfile(path)
 
 
-# --------------------------------------------------------------------------- #
-# Auth checks - one per harness, mirroring the adapter's own expectation.
-# Each returns (ok: bool, detail: str).
-# --------------------------------------------------------------------------- #
 def _auth_codex(p):
     path = "~/.codex/auth.json"
     if p.exists(path):
@@ -223,8 +210,8 @@ def _auth_opencode_provider(p, provider):
         return False, "`opencode auth list` did not run"
     if code != 0:
         return False, f"`opencode auth list` exit {code}"
-    # Subscription credentials print as lines mentioning provider + oauth; API
-    # key env lines have no "oauth" and should not pass subscription checks.
+    # WHY: Provider names can also match API-key entries. Require the OAuth marker before
+    # reporting a subscription login.
     for line in out.splitlines():
         low = line.lower()
         if provider.lower() in low and "oauth" in low:
@@ -247,10 +234,6 @@ def _auth_devin(p):
     return False, f"missing {os.path.expanduser(path)}"
 
 
-# Stock fallback when an adapter does not export DOCTOR = {"cli", "auth"}.
-# Adapters may declare DOCTOR themselves; load_harnesses() overlays those.
-# The adapter module name equals the harness name (cursor's binary is
-# cursor-agent but its adapter is cursor.py).
 _STOCK_HARNESSES = {
     "codex":    {"cli": "codex",        "auth": _auth_codex},
     "codex_v1": {"cli": "codex",        "auth": _auth_codex},
@@ -263,7 +246,6 @@ _STOCK_HARNESSES = {
     "devin":    {"cli": "devin",        "auth": _auth_devin},
 }
 
-# Adapters omitted from the default preflight matrix (opt-in via --harness).
 _OPT_IN_HARNESSES = frozenset({"claude", "grokbuild"})
 
 _CANDIDATE_HINT = (
@@ -323,9 +305,8 @@ def load_harnesses(adapters_dir=None):
 
 
 HARNESSES = load_harnesses()
-# Default doctor preflight keeps the historical matrix harnesses for the default
-# gpt-5.5-medium model; claude/grokbuild are opt-in because they support
-# API-key/open-model routes, not the default ChatGPT subscription model.
+# WHY: These opt-in adapters use authentication routes outside the default model's
+# ChatGPT subscription path.
 ALL_HARNESSES = [h for h in HARNESSES if h not in _OPT_IN_HARNESSES]
 
 
@@ -336,9 +317,6 @@ def known_harness_names():
     )
 
 
-# --------------------------------------------------------------------------- #
-# Individual check functions -> (ok, detail)
-# --------------------------------------------------------------------------- #
 def check_cli(p, cli):
     path = p.which(cli)
     if not path:
@@ -505,9 +483,6 @@ def check_image_versions(p, harnesses, pins, image=DEFAULT_IMAGE):
     return True, f"{image} matches Dockerfile pins"
 
 
-# --------------------------------------------------------------------------- #
-# Docker-environment checks (--docker-env mode)
-# --------------------------------------------------------------------------- #
 _ENV_REQUIREMENTS_DEFAULT = {"cpus": 4, "memory_gib": 12}
 _AUTH_LANES = (
     ("codex (subscription)", lambda p: _auth_codex(p)),
@@ -548,7 +523,6 @@ def check_docker_resources(p, requirements):
     if not p.which("docker"):
         return False, "docker not on PATH"
 
-    # Check CPUs
     code_cpu, out_cpu = p.run(["docker", "info", "--format", "{{.NCPU}}"])
     if code_cpu != 0 or not out_cpu.strip():
         return False, "docker daemon not responding"
@@ -559,7 +533,6 @@ def check_docker_resources(p, requirements):
     req_cpus = requirements.get("cpus", 4)
     cpu_ok = actual_cpus >= req_cpus
 
-    # Check memory (in GiB)
     code_mem, out_mem = p.run(["docker", "info", "--format", "{{.MemTotal}}"])
     if code_mem != 0 or not out_mem.strip():
         return False, "docker daemon not responding"
@@ -607,7 +580,6 @@ def discover_task_images(p, packs_dir=PACKS_DIR):
                 pack_kind = (pack_data or {}).get("kind", "")
                 if pack_kind != "tasks":
                     continue
-                # Scan each task subdirectory for task.toml with docker_image.
                 for task_name in p.listdir(version_path):
                     task_path = os.path.join(version_path, task_name)
                     task_toml_path = os.path.join(task_path, "task.toml")
@@ -648,7 +620,6 @@ def check_task_images(p, images):
 
     for image_key, sources in images.items():
         ref = sources[0]["ref"]
-        # Check image exists via inspect (fast).
         code_inspect, _ = p.run([
             "docker", "image", "inspect", ref,
         ])
@@ -657,7 +628,8 @@ def check_task_images(p, images):
             inspected[image_key] = False
             continue
 
-        # Functional probe: run the image and exec python3 -c print('ok').
+        # WHY: Image metadata can be present even when the container cannot start its task
+        # interpreter.
         code_probe, out_probe = p.run([
             "docker", "run", "--rm", ref, "python3", "-c", "print('ok')",
         ], timeout=30)
@@ -711,25 +683,21 @@ def evaluate_docker_env(p, requirements=None, task_images=None):
     rows = []
     all_ok = True
 
-    # BUILDX
     buildx_ok, buildx_detail = check_buildx(p)
     rows.append({"check": "BUILDX", "ok": buildx_ok, "detail": buildx_detail})
     if buildx_ok is False:
         all_ok = False
 
-    # CPUS/MEMORY
     resource_ok, resource_detail = check_docker_resources(p, requirements)
     rows.append({"check": "CPUS", "ok": resource_ok, "detail": resource_detail})
     if resource_ok is False:
         all_ok = False
 
-    # IMAGES (per-task pinned images)
     images_ok, images_detail = check_task_images(p, task_images)
     rows.append({"check": "IMAGES", "ok": images_ok, "detail": images_detail})
     if images_ok is False:
         all_ok = False
 
-    # AUTH lanes
     lane_results = check_auth_lanes(p)
     n_auth_ok = sum(1 for _, ok, _ in lane_results if ok)
     n_auth_fail = sum(1 for _, ok, _ in lane_results if not ok)
@@ -756,7 +724,6 @@ def format_docker_env_report(rows, lane_results, requirements):
                  f"Memory >= {requirements['memory_gib']} GiB")
     lines.append("")
 
-    # Status table.
     headers = ["check", "status", "detail"]
     table = []
     for row in rows:
@@ -776,7 +743,6 @@ def format_docker_env_report(rows, lane_results, requirements):
     for cells in table:
         lines.append(fmt(cells))
 
-    # Auth lane details.
     lines.append("")
     lines.append("Auth lanes:")
     for label, ok, detail in lane_results:
@@ -786,9 +752,6 @@ def format_docker_env_report(rows, lane_results, requirements):
     return "\n".join(lines)
 
 
-# --------------------------------------------------------------------------- #
-# Candidate preflight (manifest / config-variant)
-# --------------------------------------------------------------------------- #
 def check_manifest_version(p, candidate):
     """VERSION for manifests: declared version_command must return non-empty."""
     if not candidate.version_command:
@@ -966,9 +929,6 @@ def _evaluate_config_variant(candidate, model, probes, pins):
     return rows, all_ok
 
 
-# --------------------------------------------------------------------------- #
-# Evaluation + rendering
-# --------------------------------------------------------------------------- #
 def evaluate(harnesses, model, probes, pins=None, candidates=None):
     """Return ``(rows, ok)`` for the requested harnesses.
 
@@ -1007,7 +967,6 @@ def evaluate(harnesses, model, probes, pins=None, candidates=None):
         elif model in FRONTIER_MODEL_ENV:
             auth_ok, auth_detail = _auth_frontier(probes, name, model)
         elif model in OPEN_MODEL_ENV:
-            # Open model: AUTH = provider env key present (harness login is moot).
             keys_env_ok = name in {"codex", "codex_v1", "codex_v2"}
             auth_ok, auth_detail = check_open_key(
                 probes, OPEN_MODEL_ENV[model], keys_env_ok=keys_env_ok)
@@ -1040,7 +999,6 @@ def format_report(rows, harnesses, docker_row, image_row=None):
     """Render the status matrix + details + Docker/image status lines."""
     lines = []
 
-    # Status matrix: one row per harness, one column per check.
     by_harness = {}
     for row in rows:
         by_harness.setdefault(row["harness"], {})[row["check"]] = row["ok"]
@@ -1055,7 +1013,7 @@ def format_report(rows, harnesses, docker_row, image_row=None):
     for name in harnesses:
         cells = [name]
         harness_checks = by_harness.get(name, {})
-        if "KNOWN" in harness_checks:  # unknown harness -> collapse across columns
+        if "KNOWN" in harness_checks:
             cells += ["FAIL"] * len(checks)
         else:
             cells += [_status(harness_checks.get(c), c) for c in checks]
@@ -1073,14 +1031,12 @@ def format_report(rows, harnesses, docker_row, image_row=None):
     lines.append(fmt(["-" * w for w in widths]))
     lines.extend(fmt(cells) for cells in table)
 
-    # Details block (every check, so passes are auditable too).
     lines.append("")
     lines.append("Details:")
     for row in rows:
         lines.append(f"  [{_status(row['ok'], row['check']):>5}] {row['harness']:<9} "
                      f"{row['check']:<6} {row['detail']}")
 
-    # Docker (informational).
     ok, detail = docker_row
     lines.append("")
     lines.append(f"Docker (informational): [{_status(ok)}] {detail}")
@@ -1115,7 +1071,6 @@ def main(argv=None):
                         help=f"path to env-requirements.toml (default: {ENV_REQUIREMENTS_PATH})")
     args = parser.parse_args(argv)
 
-    # --docker-env mode: standalone docker environment preflight.
     if args.docker_env:
         probes = Probes()
         requirements = load_env_requirements(probes, args.env_requirements)
