@@ -1,18 +1,5 @@
-# MiniMax M3 solo capability read (OpenRouter free tier), bridge-only.
-#
-# ox-alpha's daily stealth bucket is exhausted until 20:00 tonight, but
-# minimax-m3 is on a separate upstream throttle that clears intermittently
-# (~60% of probes succeed). This banks minimax's read now so tonight's ox-alpha
-# reset only has to run the ox-alpha arm for the head-to-head.
-#
-# Harness held constant (codex CLI); minimax transits the bridge, so no codex
-# quota is touched. Same 18 fast tasks as the bake-off (webcore excluded).
-#
-# Retry budgets tuned for the bursty upstream throttle: a couple of retries with
-# short backoff usually lands a clean window; the arm pauses after 5 consecutive
-# throttles and revisits at the end.
-#
-#   obench matrix --spec experiments/specs/minimax-solo.toml
+# WHY: Collect this arm separately because its upstream quota window differs from the paired
+# comparator. Keep the same harness and task set to preserve comparability.
 
 results_path = "../../results/minimax-solo/results.jsonl"
 ledger_dir = "../../results/minimax-solo/ledger"
@@ -21,8 +8,7 @@ exec_mode = "local"
 trials = 3
 allow_version_drift = true
 max_consecutive_excluded = 5
-# ~2x timeout: exhaust a throttle-dominated (full-timeout-burn) cell after ~2
-# attempts instead of re-burning the timeout across the retry budget.
+# WHY: Cap cumulative wall time so repeated quota timeouts cannot burn the full retry budget.
 max_cell_wall_s = 2400
 
 [retry]

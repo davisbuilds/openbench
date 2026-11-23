@@ -7,8 +7,8 @@ set -eu
 : "${DEEPSEEK_API_BASE:?DEEPSEEK_API_BASE must be injected by the OpenBench counting proxy}"
 : "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}"
 
-# Override only the bundled DeepSeek provider endpoint. OMP retains its bundled
-# deepseek-v4-flash model metadata and compatibility policy.
+# WHY: Use the bundled model metadata and compatibility policy so the route change cannot
+# introduce a second model treatment.
 mkdir -p "$PI_CODING_AGENT_DIR"
 cat >"$PI_CODING_AGENT_DIR/models.yml" <<EOF
 providers:

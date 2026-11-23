@@ -35,7 +35,8 @@ def report_body(report, status):
         description = 'No CLI pin updates found among successful registry lookups. Check skipped rows and warnings for unavailable coverage.'
     else:
         description = f'CLI comparison failed (exit {status}); no issue will be published.'
-    # Registry output is untrusted text; indent it to prevent closing a Markdown fence.
+    # WHY: Indent untrusted registry text so its content cannot break the report’s Markdown
+    # structure.
     quoted = '\n'.join('    ' + line for line in report.strip().splitlines())
     return f'{MARKER}\n# CLI version advisory\n\n{description}\n\n{quoted}\n\n{GUIDANCE}\n'
 
@@ -89,7 +90,7 @@ def main(argv=None, *, environ=None):
     args = parser.parse_args(argv)
     body = report_body(Path(args.report).read_text(encoding='utf-8'), args.check_status)
     target = Path(args.advisory)
-    # Retain the report before making any API request, including on delivery failure.
+    # WHY: Write the report first so a delivery failure still leaves the evidence available.
     target.write_text(body, encoding='utf-8')
     result = 0 if args.check_status in (0, 1) else 1
     if args.check_status == 1:

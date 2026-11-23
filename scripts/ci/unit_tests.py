@@ -62,7 +62,7 @@ def discover():
                 walk(child)
             return
         if isinstance(item, unittest.loader._FailedTest):
-            module = item._testMethodName  # an import failure carries the module name
+            module = item._testMethodName
         else:
             module = type(item).__module__
         counts[module] = counts.get(module, 0) + 1
@@ -79,9 +79,8 @@ SUMMARY = re.compile(r'^Ran (\d+) tests? in ', re.M)
 SKIPPED = re.compile(r'^(?:OK|FAILED) \(.*\bskipped=(\d+)', re.M)
 
 
-# Modules measured at 9 seconds or more, slowest first (hosted CI and local,
-# 2026-11). Order only: a stale or missing name changes the wall time, never
-# which tests run. Refresh from the runner's "slowest modules" summary.
+# WHY: Scheduling slower modules first shortens the critical path. These hints cannot change
+# test selection.
 SLOW_FIRST = ('test_sandbox_gateway', 'test_proxy', 'test_matrix_queue_e2e', 'test_site',
               'test_evidence_identity', 'test_gateway_run', 'test_gateway_probe_http',
               'test_colima_benchmark_script', 'test_gateway_route', 'test_stall_kill',

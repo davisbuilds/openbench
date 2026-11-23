@@ -1,15 +1,5 @@
-# Timing-contamination gate -- SOLO baseline.
-#
-# Half of the acceptance gate for arm-level `--workers` (BACKLOG #45): measure
-# glm-5.3-flash's per-cell wall time running ALONE, to compare against the same
-# arm's wall time under 3-way concurrency (gate-concurrent.toml). If concurrency
-# inflates wall time beyond API-latency noise, parallel runs corrupt the latency
-# numbers the benchmark exists to produce.
-#
-# Fast, reliable core tasks only -- NO webcore (its throttling would swamp the
-# contention signal we are trying to isolate).
-#
-#   obench matrix --spec experiments/specs/gate-solo-glm.toml --workers 1
+# WHY: Use the same fast tasks as the concurrent arm so provider throttling does not obscure
+# the host contention signal.
 
 results_path = "../../results/gate/solo/results.jsonl"
 ledger_dir = "../../results/gate/solo/ledger"

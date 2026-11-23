@@ -31,7 +31,6 @@ hand, per task, under ``solution/solution.py``.
 """
 
 REGISTRY = {
-    # ---- prototype (mid difficulty) --------------------------------------
     "run-length-encoding": {
         "title": "Run-length encoding",
         "prose": """\
@@ -59,7 +58,6 @@ any valid input must return it unchanged.""",
         "roundtrip": {"consistency": ["decode", "encode"]},
     },
 
-    # ---- batch (harder end) ----------------------------------------------
     "luhn": {
         "title": "Luhn checksum validator",
         "prose": """\

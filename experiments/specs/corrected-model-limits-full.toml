@@ -1,23 +1,6 @@
-# Re-run laguna-s-2.1 AND deepseek-v4-flash under the CORRECTED model limits (commit 4a3a7e6).
-#
-# Its previous results were produced with invented limits: the provider config
-# fell back to 128000/8192 (deepseek) or free-tier numbers (laguna) instead of
-# the real values now pinned in data/model_limits.json. That is not cosmetic --
-# pi clamps every request to min(maxTokens, max(1, contextWindow - prompt -
-# 4096)), so laguna had a reply cut off at its cap on ~57% of cells and
-# deepseek's budget collapsed to 1 token on 19 long-horizon cells.
-#
-# Deliberately NOT seeded from prior results: the old rows were measured under
-# different limits, so they are not comparable and must not be reused.
-#
-# Both arms run in ONE queue on ONE host (the mini): it is the pin-compliant
-# machine (pi 0.80.10, matching obench/docker/Dockerfile), holds all six pinned
-# tb-mid image digests, and has both API keys. Splitting these arms across two
-# machines would have compared deepseek-on-pi-0.82.0 against laguna-on-pi-0.80.10
-# and called the difference a model difference.
-#
-# Three task groups because TB-7 spans both lanes: the synthetic tasks run local,
-# the terminal-bench tasks run in docker.
+# WHY: Run with measured provider limits so reply budgets reflect the actual treatment.
+# Earlier results used different limits and cannot be reused. Keep both arms on the same
+# harness version.
 results_path = "../../results/rerun-corrected/rerun.jsonl"
 ledger_dir = "../../results/rerun-corrected/ledger"
 timeout = 2400

@@ -1,11 +1,5 @@
-# OpenBench environment resource requirements
-#
-# Minimum resources the Docker daemon must provide for benchmark runs.
-# Checked by `obench doctor --docker-env`.
-#
-# NOTE: This is the floor, not a recommendation. Colima should be started with
-# the pinned config from scripts/local/colima-benchmark.sh to ensure adequate headroom
-# for concurrent container execution (agent container + checker + proxy).
+# WHY: The daemon check sets a minimum. VM reservations need room for the guest kernel and
+# concurrent agent, checker, and proxy processes.
 
 cpus = 4
 memory_gib = 12

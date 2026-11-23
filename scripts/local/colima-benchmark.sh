@@ -34,10 +34,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Resources come from the selected doctor requirements file. VM memory may
-# exceed the guest-visible Docker floor to allow for guest kernel overhead.
+# WHY: The reserved VM memory must exceed the usable daemon floor to leave room for the guest
+# kernel.
 ENV_REQUIREMENTS="$REPO_ROOT/.openbench/env-requirements.toml"
-COLIMA_DISK=100    # GiB
+COLIMA_DISK=100
 
 PROFILE="${OBENCH_COLIMA_PROFILE:-default}"
 AUTOSTART=0
@@ -50,7 +50,7 @@ fail()  { printf "\033[31m  ✗\033[0m %s\n" "$*" >&2; exit 1; }
 
 load_resources() {
   local resources
-  # Resolve against the caller's directory before run_doctor_gate changes it.
+  # WHY: Resolve the caller-relative configuration path before the gate changes directories.
   ENV_REQUIREMENTS="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).expanduser().resolve())' "$ENV_REQUIREMENTS")"
   resources="$(python3 -c '
 import sys, tomllib
@@ -71,23 +71,18 @@ except (OSError, ValueError) as exc:
   read -r COLIMA_CPUS COLIMA_MEMORY <<<"$resources"
 }
 
-# ---- profile plumbing --------------------------------------------------------
-# Colima names the Docker context of its default profile "colima" and of any
-# other profile "colima-<profile>". Every docker call here targets that context,
-# whatever the current one is.
+# WHY: Address the selected profile’s context explicitly so the gate cannot inspect a
+# different daemon.
 docker_context() {
   if [ "$PROFILE" = default ]; then echo colima; else echo "colima-$PROFILE"; fi
 }
 dk() { DOCKER_CONTEXT="$(docker_context)" docker "$@"; }
-# Colima removes its Docker context when stopping. Docker's context rm treats
-# DOCKER_CONTEXT as the active selection and can reset an unrelated stored
-# context. Lifecycle operations must see the stored selection, not the run's.
+# WHY: Colima removes its context during lifecycle operations. Preserve the user’s actual
+# current selection instead of passing the temporary benchmark override.
 colima_p() { local verb="$1"; shift; env -u DOCKER_CONTEXT -u DOCKER_HOST colima "$verb" --profile "$PROFILE" "$@"; }
 
-# Prints "<cpus> <memory GiB> <disk GiB>" when the profile's VM is running,
-# else nothing.
-# `colima status` reports neither figure, so read `colima list --json`. List
-# every profile and filter here: `colima list --profile X` fails until X exists.
+# WHY: A named profile query fails before that profile exists, so inspect the complete profile
+# listing for resources.
 running_resources() {
   { colima list --json 2>/dev/null || true; } | python3 -c '
 import json, sys
@@ -122,9 +117,7 @@ show_status() {
     warn "docker daemon not reachable inside colima"
 }
 
-# ---- brew services autostart -----------------------------------------------
-# Opt-in: the brew service starts the default profile at every login, which
-# reserves the pinned memory whether or not a benchmark is running.
+# WHY: Autostart reserves memory on every login, so it stays an explicit choice.
 enable_brew_autostart() {
   if ! command -v brew &>/dev/null; then
     warn "brew not installed — skipping brew services autostart"
@@ -161,7 +154,7 @@ install_buildx() {
 }
 
 start_colima() {
-  local action="$1"  # "start" or "restart"
+  local action="$1"
   local resources cpus memory disk
 
   resources="$(running_resources)"
@@ -188,8 +181,8 @@ start_colima() {
     ok "colima stopped"
   fi
 
-  # A second profile must not take over the current Docker context: other
-  # workloads on the host keep using theirs, and runs select this VM explicitly.
+  # WHY: Other workloads may already use the current Docker context. Launch another profile
+  # without taking it over.
   local activate=()
   [ "$PROFILE" = default ] || activate=(--activate=false)
 
@@ -228,9 +221,6 @@ run_doctor_gate() {
   fi
 }
 
-# ============================================================================
-# Main
-# ============================================================================
 main() {
   local action="start"
 
@@ -257,8 +247,7 @@ main() {
     esac
     shift
   done
-  # Resolve aliases as colima does: "colima" names the default profile, and a
-  # leading "colima-" is dropped.
+  # WHY: Normalize the same aliases as Colima before selecting a Docker context.
   case "$PROFILE" in
     colima) PROFILE=default ;;
     colima-*) PROFILE="${PROFILE#colima-}" ;;
@@ -293,7 +282,6 @@ main() {
   smoke_test
   echo ""
 
-  # Print final resource confirmation.
   show_status
   echo ""
 
@@ -307,8 +295,7 @@ main() {
   else
     ok "colima benchmark environment checks passed; campaign qualification is still required"
   fi
-  # The checks above pinned this VM's context; a run that inherits another
-  # active context would use a daemon they never saw.
+  # WHY: A later command must explicitly target the Docker context this gate inspected.
   info "Runs must target this VM. Set this where the run starts (in a tmux launch"
   info "script, not only in the shell that opens tmux):"
   echo "  export DOCKER_CONTEXT=$(docker_context)"

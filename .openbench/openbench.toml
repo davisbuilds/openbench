@@ -1,4 +1,3 @@
-# Canonical Harbor-first project defaults. Runtime artifacts remain gitignored.
 default_suite = ".openbench/suites/openbench-lite.toml"
 jobs_dir = ".openbench/jobs"
 results_dir = ".openbench/results"

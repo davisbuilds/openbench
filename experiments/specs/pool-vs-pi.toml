@@ -1,6 +1,5 @@
-# Pool x laguna coverage completion, bracketed by pi control probes.
-# Pool arm runs to full coverage; pi probes before AND after establish whether
-# provider conditions drifted during pool window (429 rates swing 0->53%).
+# WHY: Bracket the candidate with baseline probes so a change in provider conditions during
+# the run remains observable.
 results_path = "results/pool-vs-pi-n3.jsonl"
 ledger_dir = "results/pool-vs-pi-ledger"
 timeout = 2400

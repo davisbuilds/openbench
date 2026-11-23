@@ -27,8 +27,8 @@ LANES = ('repair-grading', 'repair-tools', 'concurrency', 'browser', 'browser-qu
 LANE = 'browser-quality'
 CLASSIFIER = 'scripts/ci/browser_quality_inputs.py'
 DRIVER = 'scripts/ci/harbor_ci.py'
-# Families that also load by filename or registry string; mirrors
-# obench.evidence_identity.DYNAMIC_FAMILIES.
+# WHY: These modules also load by name, so ordinary imports alone cannot identify the dynamic
+# dependencies.
 DYNAMIC_FAMILIES = ('obench/adapters', 'obench/harbor_agents', 'obench/repair_oracles')
 PATH_TOKEN = re.compile(r'[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+')
 MODULE_TOKEN = re.compile(r'\bobench(?:\.[A-Za-z_]\w*)+')
@@ -111,8 +111,8 @@ def lane_steps(text, lane=LANE):
             continue
         specific += bool(match)
         applicable.append(('\n'.join(step), bool(match)))
-    # Without a step conditioned exactly on this lane, the job layout is not
-    # the one this parser understands (or predates the lane): fail closed.
+    # WHY: Require the exact lane predicate before treating the workflow as understood. An
+    # unfamiliar shape must run the lane.
     if not specific:
         raise ValueError(f"no {JOB} step is conditioned on matrix.lane == '{lane}'")
     return applicable
@@ -166,7 +166,6 @@ def script_search_paths(source, path, tree):
         elif isinstance(node, ast.arg):
             parameters.add(node.arg)
 
-    # Roots normally use ROOT/REPO = Path(__file__).resolve().parents[2].
     for node in source.body:
         if isinstance(node, ast.Assign):
             for target in node.targets:
@@ -229,7 +228,6 @@ def inputs(tree, lane=LANE):
     files, directories, pending = {WORKFLOW, CLASSIFIER, DRIVER}, set(), []
     if WORKFLOW not in tree.files:
         raise ValueError(f'{WORKFLOW} is missing at {tree.rev}')
-    # Files a module can open by bare name: its siblings, and package data.
     siblings, package_data = {}, {}
     for path in tree.files:
         name = PurePosixPath(path).name
@@ -245,13 +243,13 @@ def inputs(tree, lane=LANE):
                 if path.endswith('.py'):
                     pending.append(path)
         elif '/' in path and path in tree.dirs:
-            # Single-segment directory literals are too coarse (e.g. './docs'
-            # in help text); concrete files and resolved imports remain valid.
+            # WHY: A bare directory in help text can over-select unrelated files, while
+            # resolved imports and concrete paths identify actual dependencies.
             directories.add(path)
 
     def add_module(name):
-        # Importing a child also executes each package initializer. Reaching
-        # a family that loads members by name includes every member.
+        # WHY: Importing a nested module executes its package initializers. Name-loaded
+        # families need their entire membership.
         parts = name.split('.')
         for count in range(1, len(parts)+1):
             prefix = '.'.join(parts[:count])
@@ -278,13 +276,10 @@ def inputs(tree, lane=LANE):
                                 for token in PATH_TOKEN.findall(step)) and not any(
                 '.'.join(name.split('.')[:count]) in modules
                 for name in MODULE_TOKEN.findall(step) for count in range(1, len(name.split('.'))+1)):
-            # A lane step naming no repository path means paths no longer
-            # resolve from the repository root (or the step changed shape).
             raise ValueError(f'a {lane} step names no repository path: {step.splitlines()[0]}')
         add_text(step, '.')
-    # Imports in a helper inherit its entry script's sys.path. Union roots
-    # conservatively across lane scripts and revisit sources when a newly read
-    # script adds a root; traversal order must not drop a package dependency.
+    # WHY: Helpers inherit entry-point search paths. Revisit sources when another entry point
+    # supplies a root so traversal order cannot hide dependencies.
     search_roots = {'.', *(str(PurePosixPath(p).parent) for p in pending)}
     seen = set()
     while pending:
@@ -298,7 +293,6 @@ def inputs(tree, lane=LANE):
             search_roots |= search_paths
             pending.extend(seen - {path})
             seen = {path}
-        # Relative imports resolve against the containing package.
         package = '.'.join(PurePosixPath(path).parent.parts) if path.startswith('obench/') else ''
         for node in ast.walk(tree_):
             if isinstance(node, ast.Import):
@@ -369,7 +363,7 @@ def decide(repo, base, head, merged=None, lane=LANE, comparison='pull_request'):
         report['merge_base'] = merge_base
         revisions_to_read = (merge_base, base, head, *([merged] if merged else []))
     else:
-        merge_base = base  # Exact before..after, including a force-push rollback.
+        merge_base = base  # WHY: A force push can undo a change that a merge-base comparison of the new branch would miss.
         revisions_to_read = (base, head)
     changed = sorted(p for p in git(repo, 'diff', '--name-only', '-z', '--no-renames',
                                     merge_base, head).split('\0') if p)
@@ -410,7 +404,7 @@ def main(argv=None):
     try:
         report = decide(args.repo, args.base, args.head, args.merged,
                         lane=args.lane, comparison=args.comparison)
-    except Exception as error:  # Fail closed: any doubt runs the lane.
+    except Exception as error:
         report = {'base': args.base, 'head': args.head, 'merged': args.merged, 'run': True,
                   'reason': f'fail-closed: {type(error).__name__}: {error}'}
     print(json.dumps(report, sort_keys=True))

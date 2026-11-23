@@ -24,8 +24,8 @@ def load(path, model="glm-5.3-flash"):
         r = json.loads(line)
         if r.get("model") != model:
             continue
-        # keep only successful, completed cells -- a failed/throttled cell's wall
-        # time is not a clean latency sample
+        # WHY: A throttled or incomplete request can spend time waiting on the provider, which
+        # is not a latency sample for the task.
         if not r.get("success"):
             continue
         rows.setdefault(r["task"], []).append(r.get("wall_time_s", 0.0))
@@ -45,7 +45,7 @@ def main():
     deltas = []
     for t in tasks:
         s, c = med(solo.get(t, [])), med(conc.get(t, []))
-        if s and c and s == s and c == c:  # both present, non-nan
+        if s and c and s == s and c == c:
             d = (c - s) / s * 100
             deltas.append(d)
             flag = "  <-- inflated" if d > 20 else ""
@@ -60,8 +60,8 @@ def main():
         print(f"median per-task wall-time delta: {agg:+.1f}%")
         n_infl = sum(1 for d in deltas if d > 20)
         print(f"tasks inflated >20%: {n_infl}/{len(deltas)}")
-        # Gate verdict: pass if the median delta is within noise (<=15%) and the
-        # inflation is not systematic (not a majority of tasks up >20%).
+        # WHY: A median within noise can hide inflation across many tasks. Check the
+        # systematic shift separately.
         systematic = n_infl > len(deltas) / 2
         if agg <= 15 and not systematic:
             print("\nGATE: PASS -- concurrency did not systematically inflate wall "
