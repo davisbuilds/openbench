@@ -111,7 +111,6 @@ class ReviewContracts(unittest.TestCase):
             (source / 'artifacts/workspace/web/app.js').write_text('changed')
             with self.assertRaisesRegex(ValueError, 'differs'):
                 prepare([source], root / 'other')
-            # Copy remains independent of the changed original.
             self.assertEqual(load_bundle(root / 'bundle')[0], bundle)
 
     def test_tampered_bundle_rejected(self):
@@ -228,7 +227,6 @@ class ReviewBrowserJourney(unittest.TestCase):
                     self.assertTrue(observed['runtime']['chromium_sandbox'])
                     self.assertTrue(any('host.docker.internal' in url for url in observed['blocked']))
                     self.assertTrue(any('example.invalid' in url for url in observed['blocked']))
-                    # The only candidate origin serves selected static assets, never the identity key.
                     inspected = json.loads(subprocess.check_output(['docker', 'inspect', descriptor['container']]))[0]
                     self.assertEqual(inspected['HostConfig']['NetworkMode'], 'none')
                     self.assertFalse(inspected['Mounts'])
@@ -240,11 +238,9 @@ class ReviewBrowserJourney(unittest.TestCase):
                     hidden_probe = subprocess.check_output(['docker', 'exec', descriptor['container'], 'python3', '-c',
                         "from pathlib import Path; assert not any(Path(p).exists() for p in ['/tests','/solution','/opt/openbench/obench/repair_oracles','/opt/openbench/obench/browser_worker.py','/opt/openbench/obench/browser_worker_v2.py','/var/run/docker.sock']); print('hidden-paths-denied')"])
                     self.assertEqual(hidden_probe.strip(), b'hidden-paths-denied')
-                    # Effective network denial from a subprocess in this same runtime.
                     network = subprocess.check_output(['docker', 'exec', descriptor['container'], 'python3', '-c',
                         "import socket,json; s=socket.socket();s.settimeout(1);print(json.dumps({'denied':s.connect_ex(('1.1.1.1',443))!=0}))"])
                     self.assertTrue(json.loads(network)['denied'])
-                    # Same origin operations require the token; cross origin is refused even with it.
                     for headers in ({}, {'Authorization': 'Bearer ' + descriptor['token'], 'Origin': 'https://hostile.invalid'}):
                         with self.assertRaises(HTTPError) as failure:
                             urlopen(Request(descriptor['url'] + '/status', headers=headers))
@@ -292,7 +288,6 @@ class ReviewBrowserJourney(unittest.TestCase):
                     record = status['last']
                     self.assertTrue(Path(record['evidence']).is_file())
                     self.assertTrue((session / record['result']['value']['screenshot']).is_file())
-                    # A persistence error must be visible, and terminate the session.
                     (session / f"{status['seq'] + 1:05d}.png").mkdir()
                     with self.assertRaisesRegex(ValueError, 'directory|Directory'):
                         client(session, 'act', {'action': 'snapshot'})

@@ -62,12 +62,10 @@ class RepoGuardTests(unittest.TestCase):
         self.assertEqual(tests_pkg._current_branch(self.root), "main")
 
     def test_restore_is_a_noop_when_branch_is_unchanged(self):
-        # No exception, and the branch stays put.
         tests_pkg._restore_branch_if_moved(self.root, "main")
         self.assertEqual(tests_pkg._current_branch(self.root), "main")
 
     def test_restore_is_a_noop_when_no_initial_branch_recorded(self):
-        # A detached / non-repo start records None; restore must do nothing.
         _git(self.root, "checkout", "-q", "-b", "somewhere")
         tests_pkg._restore_branch_if_moved(self.root, None)
         self.assertEqual(tests_pkg._current_branch(self.root), "somewhere")

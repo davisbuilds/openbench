@@ -62,8 +62,8 @@ class TestBackfillFailureClass(unittest.TestCase):
         try:
             src = os.path.join(tmp, "in.jsonl")
             dst = os.path.join(tmp, "out.jsonl")
-            # Simulates a write-time-classified row whose provider marker only
-            # existed in full_output and was intentionally not persisted.
+            # WHY: Use a retained row with no provider marker because the original indicator
+            # may only have existed in discarded full output.
             with open(src, "w", encoding="utf-8") as fh:
                 fh.write(json.dumps({"success": False, "failure_class": "rate_limited"}) + "\n")
             count, counts = backfill_failure_class.backfill(src, dst)

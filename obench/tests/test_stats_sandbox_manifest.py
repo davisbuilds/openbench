@@ -45,7 +45,8 @@ class SandboxManifestTests(unittest.TestCase):
             })
 
     def validate(self, manifest):
-        # Recompute the seal: malformed shapes must fail independently of tampering.
+        # WHY: Recompute the seal so the test reaches shape validation without failing first
+        # on tampering.
         digest = hashlib.sha256(stats._canonical_suite_manifest_bytes(manifest)).hexdigest()
         stats._validate_suite_manifest_shape(manifest, digest)
 

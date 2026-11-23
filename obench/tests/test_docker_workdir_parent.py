@@ -50,9 +50,8 @@ class DockerWorkdirParentTests(unittest.TestCase):
                     os.environ["OPENBENCH_DOCKER_TMPDIR"] = prev
 
     def test_stagers_never_call_mkdtemp_without_a_dir(self):
-        # obench.run stages the agent's workspace; obench.validate_tasks stages
-        # the polarity-check workspace. Both are bind-mounted into the task
-        # image, so neither may use tempfile's default location.
+        # WHY: Docker must see both the runner and validation copies. The default temporary
+        # directory can be outside its shared mount roots.
         for module in ("run", "validate_tasks"):
             path = os.path.join(paths.PACKAGE_DIR, f"{module}.py")
             with open(path, encoding="utf-8") as fh:

@@ -99,7 +99,7 @@ class SandboxReceiptTests(unittest.TestCase):
             if oracle.endswith('v2'):
                 with self.assertRaisesRegex(ValueError,'isolated browser observer'):check()
             else:
-                check()  # Historical evidence is still readable.
+                check()
 
 
 class StagedAuthTests(unittest.TestCase):

@@ -27,7 +27,6 @@ class TestReportCoverage(unittest.TestCase):
         self.assertEqual(report.coverage_warnings(stats, arms), [])
 
     def test_excluded_only_cell_counts_as_planned_but_unsatisfied(self):
-        # trial 3 never produced a verdict: planned=3, satisfied=2 -> 67%.
         rows = [_row("t", 1, "solved", True), _row("t", 2, "wrong_answer"),
                 _row("t", 3, "rate_limited")]
         arms, _tasks, stats = report.aggregate(rows)
@@ -37,8 +36,6 @@ class TestReportCoverage(unittest.TestCase):
         self.assertIn("1 of 3 planned cells", warnings[0])
 
     def test_retry_after_exclusion_restores_full_coverage(self):
-        # A 429 followed by a successful retry of the SAME cell must not count
-        # twice; coverage is over distinct (task, trial) cells, not rows.
         rows = [_row("t", 1, "rate_limited"), _row("t", 1, "solved", True)]
         arms, _tasks, stats = report.aggregate(rows)
         self.assertEqual(report.coverage(stats[arms[0]]), 1.0)

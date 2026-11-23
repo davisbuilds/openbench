@@ -50,10 +50,7 @@ def _make_task(root, name, checker_body, *, solved=True):
     return task
 
 
-# A polarity-correct checker: fails on the bare workspace, passes once the
-# solution overlay drops solved.txt.
 _POLARITY_OK = "#!/bin/sh\n[ -f solved.txt ] && exit 0 || exit 1\n"
-# An environment-gated checker that cannot run here.
 _SKIP_77 = "#!/bin/sh\necho 'SKIP: external deps absent' >&2\nexit 77\n"
 
 
@@ -61,7 +58,7 @@ class LocalTierDiscoveryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="obench_vt_tier_")
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        os.makedirs(os.path.join(self.tmp, "tasks"))  # marks the repo root
+        os.makedirs(os.path.join(self.tmp, "tasks"))
 
     def test_default_local_tasks_dir_returns_tasks_local_when_present(self):
         self.assertIsNone(paths.default_local_tasks_dir(start=self.tmp))
@@ -95,17 +92,13 @@ class SkipContractTests(unittest.TestCase):
         self.assertIn("skipped", out.lower())
 
     def test_skip_never_runs_the_solution_overlay(self):
-        # A skipped checker must not be reported as a passing solution; the row
-        # is SKIP, with no solution score claimed.
         _make_task(self.tmp, "needs-deps", _SKIP_77)
         rc, out = self._run(self.tmp)
         self.assertEqual(rc, 0, out)
-        # No passing-solution cell is claimed for a skipped task.
         self.assertNotIn("PASS(ok)", out)
 
     def test_skip_does_not_mask_a_real_failure(self):
         _make_task(self.tmp, "needs-deps", _SKIP_77)
-        # Bad polarity: passes on the bare workspace -> a real FAIL.
         _make_task(self.tmp, "broken", "#!/bin/sh\nexit 0\n")
         rc, out = self._run(self.tmp)
         self.assertEqual(rc, 1, out)

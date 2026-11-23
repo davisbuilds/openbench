@@ -17,7 +17,8 @@ class SandboxCodexTests(unittest.TestCase):
 
         class Base:
             def _convert_events_to_trajectory(self, directory):
-                # Pinned Harbor drops zero-valued totals during conversion.
+                # WHY: The pinned converter drops explicit zero metrics. Preserve that
+                # external behavior in the fixture.
                 return SimpleNamespace(final_metrics=SimpleNamespace(
                     **{field: None for field in fields.values()}))
 
@@ -36,8 +37,6 @@ class SandboxCodexTests(unittest.TestCase):
                     for field in fields.values():
                         self.assertEqual(getattr(metrics, field),
                                          0 if type(value) is int and value == 0 else None)
-            # Missing metrics in the latest valid totals must not inherit zero
-            # from either an earlier report or an earlier conversion.
             events[-1]['payload']['info']['total_token_usage'] = {}
             (root / 'rollout.jsonl').write_text('\n'.join(json.dumps(e) for e in events))
             metrics = obj._convert_events_to_trajectory(root).final_metrics
@@ -61,7 +60,6 @@ class SandboxCodexTests(unittest.TestCase):
             result = obj._convert_events_to_trajectory([first, first, next_call])
             self.assertEqual(result, [first['info']['last_token_usage'], None,
                                      next_call['info']['last_token_usage']])
-        # Start a new session with the previous session's final snapshot.
         self.assertEqual(obj._convert_events_to_trajectory([next_call]),
                          [next_call['info']['last_token_usage']])
 
@@ -80,7 +78,6 @@ class SandboxCodexTests(unittest.TestCase):
                          contradictory['info']['last_token_usage'])
 
     def test_constructor_accepts_only_supported_model_effort_pairs(self):
-        # Exercise our constructor without requiring optional Harbor in unit CI.
         class Base:
             def __init__(self, model_name, reasoning_effort=None, **kwargs):
                 self.model_name = model_name

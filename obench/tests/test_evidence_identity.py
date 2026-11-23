@@ -99,7 +99,6 @@ class EvidenceIdentityTests(unittest.TestCase):
         original = cli.read_text()
         cli.write_text(original + '\nfrom . import report\n')
         self.assertIn('obench/report.py', ra.implementation())
-        # A newly expressed routing condition is conservatively traversed.
         cli.write_text(original.replace('if command == "report":', 'if command in ("report", "run"):'))
         self.assertIn('obench/report.py', ra.implementation())
 

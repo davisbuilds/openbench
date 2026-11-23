@@ -258,8 +258,8 @@ direct_control_arm_id = "direct"
 
     @contextlib.contextmanager
     def _runtime(self):
-        # The schema correctly requires HTTPS. The in-process fake transport
-        # speaks plain HTTP; replace only the proxy client's connection class.
+        # WHY: Keep the declared HTTPS scheme valid while avoiding a test TLS server by
+        # substituting only the in-process connection.
         class PlainHTTPSConnection(http.client.HTTPConnection):
             pass
 
@@ -350,7 +350,6 @@ direct_control_arm_id = "direct"
                 {"exploratory"},
             )
 
-            # A fully valid block is skipped on resume.
             resumed = gateway_run.run_experiment(
                 self.experiment,
                 results_path=self.results,
@@ -361,7 +360,6 @@ direct_control_arm_id = "direct"
             )
             self.assertEqual((resumed.rows_appended, resumed.blocks_skipped), (0, 1))
 
-            # A partial attempt is preserved; resume starts a fresh all-arm attempt.
             partial = self.root / "partial.jsonl"
             partial.write_text(json.dumps(first_rows[0], sort_keys=True) + "\n")
             replacement = gateway_run.run_experiment(

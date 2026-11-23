@@ -34,7 +34,7 @@ def _current_branch(repo_root) -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     branch = out.stdout.strip()
-    return branch or None  # empty stdout on a detached HEAD
+    return branch or None
 
 
 def _restore_branch_if_moved(repo_root, initial_branch) -> None:
@@ -63,8 +63,8 @@ def _restore_branch_if_moved(repo_root, initial_branch) -> None:
         )
 
 
-# Captured at import, before any test module runs, so it is the pristine
-# pre-suite branch. Only a real editable checkout on a branch arms the guard.
+# WHY: Capture the branch before any test import can move it, so cleanup can restore the
+# original editable checkout.
 _INITIAL_BRANCH = (
     _current_branch(_REPO_ROOT) if (_REPO_ROOT / ".git").exists() else None
 )

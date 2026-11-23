@@ -72,7 +72,6 @@ class ArtifactObserverTests(unittest.TestCase):
         self.assertEqual(review.observe(files, protected)['value']['scope_drift'], ['changed:src/example.py'])
         del files['src/example.py']
         self.assertEqual(review.observe(files, protected)['value']['scope_drift'], ['removed:src/example.py'])
-        # A solver cannot opt an older package into the new behavior.
         self.assertIn('added:.openbench-review.json', review.observe(files, self.protected)['value']['scope_drift'])
 
     def test_only_the_exact_runtime_git_pointer_is_exempt(self):

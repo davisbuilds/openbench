@@ -39,7 +39,8 @@ class GitRepoFixture:
         _git(root, "init")
         _git(root, "config", "user.email", "test@example.com")
         _git(root, "config", "user.name", "Test")
-        # Avoid noisy default-branch variance across git versions.
+        # WHY: Git installations can select different initial branch names. Pick one so the
+        # fixture asserts the same branch on every host.
         _git(root, "checkout", "-b", "main")
         _write(os.path.join(root, "README.md"), "root\n")
         _write(os.path.join(root, "services", "billing", "app.py"), "VALUE = 1\n")
@@ -161,7 +162,6 @@ class WorkspaceStagingTests(unittest.TestCase):
             os.path.join(orphan, "workspace.toml"),
             'kind = "git"\nrepo = "."\nref = "HEAD"\n',
         )
-        # Place orphan outside any git repo.
         bare = os.path.join(self.tmp, "notgit")
         os.makedirs(bare)
         orphan2 = os.path.join(bare, "task")
@@ -230,8 +230,6 @@ class WorkspaceStagingTests(unittest.TestCase):
             ["git", "-C", self.repo.root, "worktree", "list"], text=True,
         )
         self.assertEqual(before_wt, after_wt)
-        # No new top-level temp dirs left under our fixture root (dest may be
-        # partially filled, but no clone litter).
         after_entries = set(os.listdir(self.tmp))
         self.assertEqual(before_entries, after_entries)
 

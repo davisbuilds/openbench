@@ -139,8 +139,6 @@ class DockerfileParseTests(unittest.TestCase):
         )
         self.assertTrue(os.path.isfile(os.path.join(ws, "setup.sh")))
         self.assertTrue(os.path.isfile(os.path.join(ws, "data.txt")))
-        # Final WORKDIR changed but COPY targeted /app — not docker-required
-        # from COPY alone.
         self.assertFalse(a.docker_required)
 
 
@@ -167,7 +165,6 @@ class RewardMappingTests(unittest.TestCase):
         tmp = tempfile.mkdtemp(prefix="obench_reward_json_")
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         _write(os.path.join(tmp, "reward.json"), '{"accuracy": 0.9, "other": 1}\n')
-        # Prefer reward, score, accuracy — accuracy wins here.
         self.assertEqual(ih.reward_from_dir(tmp), 0.9)
         _write(os.path.join(tmp, "reward.json"), '{"reward": 0.55, "accuracy": 0.9}\n')
         self.assertEqual(ih.reward_from_dir(tmp), 0.55)
@@ -324,7 +321,6 @@ class FixtureImportTests(unittest.TestCase):
         self.assertTrue(
             os.path.isfile(os.path.join(task, "workspace", "greeting.txt"))
         )
-        # Polarity via validate helpers.
         ws_code, ws_out, ws_raw = run_checker(task, False)
         sol_code, sol_out, sol_raw = run_checker(task, True)
         self.assertNotEqual(ws_code, 0, ws_out)
@@ -368,7 +364,6 @@ class RoundTripExportImportTests(unittest.TestCase):
         exported = os.path.join(harbor_out, self.task_name)
         self.assertTrue(os.path.isfile(os.path.join(exported, "tests", "test.sh")))
 
-        # Original polarity / scores.
         o_ws_code, o_ws_out, o_ws_raw = run_checker(self.original, False)
         o_sol_code, o_sol_out, o_sol_raw = run_checker(self.original, True)
         o_ws_score = effective_score(o_ws_code, o_ws_raw)
@@ -384,7 +379,6 @@ class RoundTripExportImportTests(unittest.TestCase):
         self.assertTrue(r.solution_materialized)
         self.assertTrue(r.validated, r.notes)
 
-        # Reimported checker verdicts match original on untouched + solution.
         i_ws_code, i_ws_out, i_ws_raw = run_checker(r.out_dir, False)
         i_sol_code, i_sol_out, i_sol_raw = run_checker(r.out_dir, True)
         i_ws_score = effective_score(i_ws_code, i_ws_raw)

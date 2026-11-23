@@ -209,7 +209,6 @@ class InitInstallListTests(unittest.TestCase):
                 os.path.join(src, "pack.toml"),
                 'org = "acme"\nname = "bad"\nversion = "0.1.0"\n',
             )
-            # Task missing checker.sh → hard structure finding.
             task = os.path.join(src, "broken")
             os.makedirs(os.path.join(task, "workspace"), exist_ok=True)
             _write(os.path.join(task, "instruction.md"), "# broken\n")
@@ -230,7 +229,6 @@ class InitInstallListTests(unittest.TestCase):
             )
             results = packs.verify_pack(info["dest"])
             self.assertTrue(all(r["ok"] for r in results))
-            # Tamper with a task oracle input.
             with open(
                 os.path.join(info["dest"], "alpha", "instruction.md"),
                 "a", encoding="utf-8",
@@ -265,8 +263,6 @@ class InitInstallListTests(unittest.TestCase):
             self.assertTrue(missing[0]["missing_member"])
 
     def test_install_from_zip_url_via_local_https_source_classification(self):
-        # Materialize https path using a file://-like flow is awkward; exercise
-        # archive extract helper through a zip on disk via classify + zip roundtrip.
         with tempfile.TemporaryDirectory() as td:
             src = os.path.join(td, "src")
             _make_pack(src, version="2.0.0")
@@ -280,7 +276,6 @@ class InitInstallListTests(unittest.TestCase):
                             os.path.relpath(full, src),
                         )
                         zf.write(full, arcname=arc)
-            # Use dir install for layout; separately test _extract + _find_pack_root.
             extract = os.path.join(td, "extract")
             os.makedirs(extract)
             packs._extract_archive(zip_path, extract, "https://example.com/pack.zip")
@@ -540,7 +535,6 @@ class HarnessPackTests(unittest.TestCase):
             packs.install_pack("z/p@0.2.0", src, packs_root=packs_root)
             old = os.environ.get("PWD")
             try:
-                # resolve uses default_packs_root()=cwd/.openbench/packs unless given
                 loaded = load_candidates(
                     ["z/p@0.2.0"],
                     default_adapters_dir(),
@@ -589,7 +583,6 @@ class PacksIndexTests(unittest.TestCase):
             self.assertEqual(entries[0]["source"], "data/packs/smoke")
             self.assertIn("content_sha256", entries[0])
 
-            # Bump version and upsert.
             _make_pack(src, org="acme", name="smoke", version="1.1.0")
             info2 = packs.publish_packs_index(
                 src, site_dir=site, source="data/packs/smoke"

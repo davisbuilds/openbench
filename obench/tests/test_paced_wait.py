@@ -35,7 +35,7 @@ class PacedWaitTests(unittest.TestCase):
         row = {}
         ledger = [{"usage": {"input": 1, "output": 1}, "paced_wait_ms": 4000},
                   {"usage": {"input": 1, "output": 1}, "paced_wait_ms": 1500},
-                  {"paced_wait_ms": 500}]  # non-usage requests still waited
+                  {"paced_wait_ms": 500}]
         apply_proxy_ledger(row, ledger)
         self.assertEqual(row["paced_wait_s"], 6.0)
         self.assertIn("paced_wait_s", ROW_FIELDS)

@@ -20,7 +20,7 @@ class CodexModelIdentityTests(unittest.TestCase):
         info = codex.model_identity("gpt-5.6-terra-xhigh")
         self.assertEqual(info["canonical_model"], "gpt-5.6-terra")
         self.assertEqual(info["reasoning_effort"], "xhigh")
-        self.assertIs(info["is_open"], False)  # native subscription arm
+        self.assertIs(info["is_open"], False)
 
     def test_luna_max_splits(self):
         info = codex.model_identity("gpt-5.6-luna-max")
@@ -38,13 +38,13 @@ class CodexModelIdentityTests(unittest.TestCase):
         info = codex.model_identity("minimax-m3")
         self.assertEqual(info["canonical_model"], "minimax-m3")
         self.assertEqual(info["reasoning_effort"], "medium")
-        self.assertIs(info["is_open"], True)  # bridge-routed open arm
+        self.assertIs(info["is_open"], True)
 
     def test_unknown_model_passes_through_with_no_effort_claim(self):
         info = codex.model_identity("totally-made-up-model")
         self.assertEqual(info["canonical_model"], "totally-made-up-model")
         self.assertIsNone(info["reasoning_effort"])
-        self.assertIsNone(info["is_open"])  # honest unknown, not a guess
+        self.assertIsNone(info["is_open"])
 
 
 class ResolveModelIdentityTests(unittest.TestCase):
@@ -62,8 +62,8 @@ class ResolveModelIdentityTests(unittest.TestCase):
         self.assertIs(is_open, True)
 
     def test_unknown_harness_falls_back_to_model_and_none(self):
-        # An adapter that cannot load must never break a row: the honest answer
-        # is the glued name and no effort/open claim, not a raised exception.
+        # WHY: An unavailable adapter must not prevent retaining a collected result. Keep the
+        # model label without inferring its treatment.
         canonical, effort, is_open = run._resolve_model_identity(
             "no-such-harness", "some-model", None)
         self.assertEqual(canonical, "some-model")

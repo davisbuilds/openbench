@@ -152,7 +152,8 @@ class TaskBindingTests(unittest.TestCase):
                 expected=self.seal(root)
                 old=path.read_text()
                 path.write_text(old+'\n# changed trusted input\n')
-                # TOML comments intentionally canonicalize away; mutate actual policy.
+                # WHY: Mutate the policy itself because TOML comments do not affect its
+                # canonical representation.
                 if path.name=='task.toml':
                     path.write_text(old.replace('no-network','public-network'))
                 with self.assertRaisesRegex(GradingError,'binding mismatch'):
@@ -229,7 +230,6 @@ class DockerGradingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             shutil.copytree(REPO/'benchmarks/harbor/local/am-benchmark-pr106-c2-o3/environment/app/src', root/'src')
-            # Candidate exception crosses the real production catch handler.
             file = root/'src/db/schema.ts'
             source = file.read_text()
             target = 'export function initSchema(): void {'

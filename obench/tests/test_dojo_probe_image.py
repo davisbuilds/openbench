@@ -38,8 +38,8 @@ class ProbeImageTests(unittest.TestCase):
         built = "sha256:" + "a" * 64
         resolved = "sha256:" + "b" * 64
         unrelated = "sha256:" + "c" * 64
-        # A small Docker CLI fake keeps ordinary CI offline; the actual Docker
-        # contaminated-image/rebuild control is exercised by the probe itself.
+        # WHY: Use a fake CLI to keep ordinary CI offline. The Docker probe covers the actual
+        # image lifecycle.
         backend = r"""
 import json, sys
 from pathlib import Path

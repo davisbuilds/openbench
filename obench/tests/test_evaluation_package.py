@@ -260,8 +260,8 @@ class DockerPackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             files = fixture()
-            # Full ordinary dev checkout stays in the solver projection; only
-            # the web source crosses the stopped-solver grading boundary.
+            # WHY: Keep the full checkout available to the solver while restricting the
+            # stopped-solver grading boundary to the web source.
             task = Path(__file__).resolve().parents[2] / 'benchmarks/harbor/local/activity-explorer-c2-o2'
             files = {n: b for n, b in files.items() if not n.startswith(('solver/workspace/', 'controls/'))}
             for p in (task / 'environment/app').rglob('*'):

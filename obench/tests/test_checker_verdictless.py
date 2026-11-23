@@ -37,14 +37,13 @@ class CheckerVerdictlessTests(unittest.TestCase):
         self.assertTrue(is_excluded_from_solve_rate(_row()))
 
     def test_mount_loss_row_reclassified_infra(self):
-        # container exit 0 but reward file vanished (colima /tmp mount): same
-        # marker, same reclassification.
+        # WHY: A wrapper may exit successfully while a lost mount leaves no reward artifact
+        # for the checker.
         row = _row(checker_stdout="SCORE: 0\nFAIL: verifier did not produce "
                                   "/logs/verifier/reward.txt (container exit 0)")
         self.assertEqual(class_for_report(row), "infra")
 
     def test_negative_control_genuine_fail_stays_wrong_answer(self):
-        # A judged failure has a reward-derived SCORE line and no marker.
         row = _row(checker_stdout="2 failed, 1 passed\nSCORE: 0")
         self.assertEqual(class_for_report(row), "wrong_answer")
 
@@ -54,10 +53,8 @@ class CheckerVerdictlessTests(unittest.TestCase):
         self.assertEqual(class_for_report(row), "solved")
 
     def test_excluded_row_with_marker_never_promoted_to_verdict(self):
-        # A stored-excluded row (rate_limited storm) carrying the marker must
-        # NOT be promoted to wrong_answer by the checker-owned-verdict rule:
-        # its checker_exit=1 is the wrapper's verifier-missing branch, not a
-        # judgment. Found live on 8 pi x laguna tb2 cells.
+        # WHY: The wrapper also uses exit 1 for a missing verdict. The marker disambiguates
+        # that outcome from an observed wrong answer.
         row = _row(failure_class="rate_limited", completed=True,
                    checker_workspace_files=["a.py"])
         self.assertEqual(class_for_report(row), "infra")

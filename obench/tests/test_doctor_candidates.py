@@ -98,7 +98,6 @@ class TestAdapterDoctorDiscovery(unittest.TestCase):
         self.assertTrue(callable(discovered["auth"]))
         harnesses = doctor.load_harnesses(doctor.ADAPTERS_DIR)
         self.assertEqual(harnesses["pi"]["cli"], "pi")
-        # Re-import yields a fresh function object; behavior must match.
         ok, detail = harnesses["pi"]["auth"](FakeProbes(
             exists_set={os.path.expanduser("~/.pi/agent/auth.json")},
             json_map={os.path.expanduser("~/.pi/agent/auth.json"):

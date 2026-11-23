@@ -38,17 +38,13 @@ class TestErrTailDecode(unittest.TestCase):
         for name in ADAPTERS:
             mod = load(name)
             with self.subTest(adapter=name):
-                # The real crash case: bytes stdout, None stderr.
                 e = subprocess.TimeoutExpired("cmd", 1, output=b"out-bytes", stderr=None)
                 tail = mod._err_tail(e)
                 self.assertIsInstance(tail, str)
                 self.assertIn("out-bytes", tail)
-                # None stdout, bytes stderr.
                 e2 = subprocess.TimeoutExpired("cmd", 1, output=None, stderr=b"err-bytes")
                 self.assertIn("err-bytes", mod._err_tail(e2))
-                # Both None.
                 self.assertEqual(mod._err_tail(subprocess.TimeoutExpired("cmd", 1)), "")
-                # Both str (text-mode success path still works).
                 e4 = subprocess.TimeoutExpired("cmd", 1, output="s-out", stderr="s-err")
                 self.assertEqual(mod._err_tail(e4), "s-outs-err")
 
@@ -83,8 +79,6 @@ class TestTimeoutReturnsCleanDict(unittest.TestCase):
         self.assertIsNone(result["tokens"])
         self.assertIsNone(result["turns"])
 
-    # Adapters whose run() has no pre-subprocess filesystem/auth dependency for
-    # the canonical closed model.
     def test_opencode(self):
         self._assert_clean(self._run_with_timeout(load("opencode"), "gpt-5.5-medium"))
 

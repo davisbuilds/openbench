@@ -61,7 +61,6 @@ class SandboxSuiteTests(unittest.TestCase):
         env = suite_run.plan_jobs(captured)[0].artifact.as_dict()['environment']['kwargs']
         self.assertEqual(env['context_archive'], str(archive))
         self.assertEqual(env['context_sha256'], digest)
-        # A subsequent source mutation cannot silently enter a pinned suite.
         with archive.open('ab') as f:
             f.write(b'changed')
         with self.assertRaises(SuiteError):

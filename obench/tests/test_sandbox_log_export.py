@@ -19,8 +19,8 @@ class LogExportTests(unittest.IsolatedAsyncioTestCase):
         cls = sandbox._build_environment_class(object, None, None)
         self.env = cls.__new__(cls)
         self.env._containers = {"main": "offline-container"}
-        # Export-content tests start after sealing; separate controls exercise
-        # sealing refusal and the real Harbor/Docker lifecycle.
+        # WHY: The content probe starts from a sealed state. The lifecycle controls separately
+        # exercise sealing and its refusal path.
         self.env._sealed = True
         self.env._image_id = "sha256:" + "a" * 64
         self.env._gateway_ledger_sha = "b" * 64
@@ -91,7 +91,6 @@ class LogExportTests(unittest.IsolatedAsyncioTestCase):
                 await self.env.download_dir("/logs/agent", self.root / "logs")
 
     async def test_total_log_bound_accepts_exact_limit_and_refuses_one_extra_byte(self):
-        # Smaller policy values keep the aggregate control cheap in offline CI.
         for size in (8, 9):
             packed = sandbox.pack_files({"first": b"a" * 8, "second": b"b" * size})
             target = self.root / str(size)

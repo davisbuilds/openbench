@@ -131,7 +131,8 @@ class FakeHarborCodex:
                         'rm -rf /tmp/codex-secrets "$CODEX_HOME"',
                     )
                 except Exception:
-                    # Mirrors Harbor's best-effort cleanup block.
+                    # WHY: Harbor’s own cleanup ignores errors at this boundary, so the
+                    # fixture must reproduce that behavior.
                     pass
 
     def _get_session_dir(self):

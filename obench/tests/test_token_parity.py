@@ -126,7 +126,7 @@ class TokenParityFixtureTests(unittest.TestCase):
         self.assertEqual(usage["tokens_input_uncached"], 15)
         self.assertEqual(usage["tokens_cache_read"], 30)
         self.assertEqual(usage["tokens_cache_write"], 40)
-        self.assertEqual(usage["tokens_output"], 44)  # output + reasoning
+        self.assertEqual(usage["tokens_output"], 44)
         self.assertEqual(usage["tokens_reasoning"], 24)
         self.assertEqual(usage["token_basis"], "vendor_split")
 
@@ -145,7 +145,7 @@ class TokenParityFixtureTests(unittest.TestCase):
         actual = {"tokens": tokens, **usage}
         self.assertEqual(turns, 1)
         self.assert_usage_matches(actual, expected("codex"))
-        self.assertEqual(tokens, 508)  # do not double-count reasoning subset
+        self.assertEqual(tokens, 508)
 
     def test_codex_153_cache_write_field_survives_run_normalization(self):
         codex = load_adapter("codex")
@@ -153,8 +153,8 @@ class TokenParityFixtureTests(unittest.TestCase):
                                "codex-0.153.0", "turn-completed.json")
         with open(fixture, encoding="utf-8") as fh:
             event = json.load(fh)
-        # The captured event reports zero. Missing and positive values below
-        # are synthetic boundary cases for the same schema.
+        # WHY: The captured event covers explicit zero. Add missing and positive values to
+        # distinguish them from zero.
         for writes in (0, None, 30):
             with self.subTest(cache_write_input_tokens=writes):
                 usage = dict(event["usage"])
@@ -216,7 +216,6 @@ class TokenParityFixtureTests(unittest.TestCase):
         for index, field in enumerate(fields):
             for writes in (0, 15):
                 with self.subTest(field=field, writes=writes):
-                    # Conflicting lower-priority aliases must not replace zero.
                     counts = {alias: 25 for alias in fields[index + 1:]}
                     counts[field] = writes
                     result = self._replay_codex_cache_usage("gpt-5.6-terra-xhigh", counts)

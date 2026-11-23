@@ -79,7 +79,6 @@ class RunMatrixTests(unittest.TestCase):
 
     def test_refuses_unknown_task(self):
         self.make_task("t1")
-        # t2 never created: wrong --tasks-dir / typo must be caught up front
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             code = run_matrix.main(self.argv("--dry-run"))

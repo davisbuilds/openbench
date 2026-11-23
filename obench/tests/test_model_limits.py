@@ -56,9 +56,8 @@ class PinnedLimitsTests(unittest.TestCase):
                 f"{key}: output cap {cap} exceeds context window {ctx}")
 
     def test_no_entry_still_carries_the_old_fallback_pair(self):
-        # 128000/8192 was the silent fallback. If a model resolves to exactly
-        # that pair again, it is far more likely the fallback leaked back in
-        # than that the real numbers coincide.
+        # WHY: The shared fallback once returned this pair for every unknown model, so its
+        # recurrence is evidence of fallback drift.
         for key, rec in sorted(self.pinned.items()):
             self.assertNotEqual(
                 (rec["context_window"], rec["max_tokens"]), (128000, 8192),
@@ -66,8 +65,7 @@ class PinnedLimitsTests(unittest.TestCase):
                 f"against the provider rather than trusting it")
 
     def test_openrouter_ids_are_exact_not_tier_variants(self):
-        # laguna was mis-set from the ':free' row. Tier suffixes carry different
-        # limits, so a pinned id must never be a variant of a declared model.
+        # WHY: Provider tiers carry separate limits even when their base model names match.
         for key, spec in sorted(fml.LIMIT_SOURCES.items()):
             or_id = spec["openrouter_id"]
             self.assertNotIn(
@@ -176,9 +174,8 @@ class NoFallbackTests(unittest.TestCase):
             self.assertIn(f"maxTokens: {rec['max_tokens']}", js)
 
     def test_limits_file_is_mounted_into_the_container(self):
-        # pi.py reads this INSIDE the container. An adapter dependency that is
-        # not mounted has killed every cell for its harness three times before
-        # (router_spec, candidates, gateway_spec).
+        # WHY: Adapters load limits inside the container. A host-only fixture would miss a
+        # missing mount.
         from obench import docker_exec
         src = pathlib.Path(docker_exec.__file__).read_text(encoding="utf-8")
         self.assertIn("/bench/model_limits.json", src,
