@@ -84,8 +84,8 @@ REGEX_WORDS = {
     "throw",
     "yield",
 }
-JS_EXPRESSION_TOKEN = re.compile(r"=>|\.\.\.|\+\+|--|[$\w]+|\S")
-JS_EXPRESSION_REGEX_WORDS = REGEX_WORDS - {"of"} | {"instanceof", "new"}
+JS_EXPRESSION_TOKEN = re.compile(r"=>|\.\.\.|\+\+|--|#?[$\w]+|\S")
+JS_EXPRESSION_REGEX_WORDS = REGEX_WORDS - {"of", "yield"} | {"instanceof", "new"}
 C_FAMILY = {
     ".js",
     ".jsx",
