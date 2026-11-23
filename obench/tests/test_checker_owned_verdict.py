@@ -37,8 +37,6 @@ RATE_LIMITED_TRANSCRIPT = (
 
 class CheckerOwnedVerdictTests(unittest.TestCase):
     def test_recovered_rate_limit_keeps_the_checker_verdict(self):
-        # The canonical case: agent hit a 429, recovered, finished; the checker
-        # then FAILED the answer. That is a wrong answer, not an infra event.
         self.assertEqual(
             fc.classify_failure(_row(), RATE_LIMITED_TRANSCRIPT), "wrong_answer")
 
@@ -48,31 +46,24 @@ class CheckerOwnedVerdictTests(unittest.TestCase):
                                 RATE_LIMITED_TRANSCRIPT), "solved")
 
     def test_rate_limit_with_no_work_stays_excluded(self):
-        # Throttled before producing anything: the model never answered, so it
-        # cannot have answered wrong. This is the case the guards protect.
         self.assertEqual(
             fc.classify_failure(_row(turns=0, tokens_output=0),
                                 RATE_LIMITED_TRANSCRIPT), "rate_limited")
 
     def test_incomplete_run_stays_excluded(self):
-        # Killed mid-answer -> the agent never got to finish, so the checker's
-        # verdict is about a truncated attempt, not the model's capability.
         self.assertEqual(
             fc.classify_failure(_row(completed=False), RATE_LIMITED_TRANSCRIPT),
             "rate_limited")
 
     def test_checker_crash_stays_excluded_even_when_completed(self):
-        # exit outside {0,1} is a broken checker, never a model verdict. Which
-        # infra-family label it lands on depends on pre-existing precedence
-        # (a 429 marker is matched before the crash check), so assert the
-        # property that matters for every published rate: it is NOT a verdict.
+        # WHY: Checker crashes may receive different infra labels depending on earlier
+        # signals. Every such label must stay outside the published verdict denominator.
         for transcript in (RATE_LIMITED_TRANSCRIPT, "clean run\n"):
             got = fc.classify_failure(_row(checker_exit=125), transcript)
             self.assertIn(got, fc.EXCLUDED_FROM_SOLVE_RATE)
             self.assertNotEqual(got, "wrong_answer")
 
     def test_infra_marker_with_a_real_verdict_also_defers_to_the_checker(self):
-        # Same reasoning for the infra family: 11 such cells existed.
         transcript = "docker: Error response from daemon: transient\nrecovered\n"
         self.assertEqual(fc.classify_failure(_row(), transcript), "wrong_answer")
 
@@ -118,11 +109,8 @@ class PromotionPrecedenceTests(unittest.TestCase):
         self.assertEqual(fc.class_for_report(row), "infra")
 
     def test_throttle_dominated_with_verdict_is_still_promoted(self):
-        # Standing campaign rule: a checker-owned verdict with affirmative
-        # work counts even when most replies were throttled (recovered-with-
-        # tokens = genuine). 23 pi x laguna wide25 cells depend on this;
-        # flipping it moves a published denominator and is a rerun decision,
-        # not a classification one.
+        # WHY: Excluding a recovered attempt with a checker verdict would change the published
+        # denominator for completed campaigns.
         row = _row(failure_class="rate_limited",
                    replies_ok=2, replies_throttled=9)
         self.assertEqual(fc.class_for_report(row), "wrong_answer")

@@ -57,8 +57,6 @@ class FixtureHandler(BaseHTTPRequestHandler):
             }).encode()
             ctype = "application/json"
         elif self.path.endswith("/openrouter-cost"):
-            # OpenRouter-style body: usage carries a real accounted `cost`
-            # when the request set usage: {include: true}.
             payload = json.dumps({
                 "usage": {
                     "prompt_tokens": 20,
@@ -68,8 +66,6 @@ class FixtureHandler(BaseHTTPRequestHandler):
             }).encode()
             ctype = "application/json"
         elif self.path.endswith("/litellm-header-cost"):
-            # LiteLLM-computed cost surfaced only as a response header, no
-            # inline `cost` in the usage body.
             payload = json.dumps({
                 "usage": {"prompt_tokens": 20, "completion_tokens": 5},
             }).encode()
@@ -375,25 +371,19 @@ class ProxyTests(unittest.TestCase):
                     self.assertFalse(run.proxy_supported_for_cell('pi', alias))
 
     def test_codex_open_model_eligibility_derived_from_registry(self):
-        # OpenRouter open arms live in the codex adapter's OPEN_MODELS registry.
-        # Proxy metering eligibility must track that registry, not a
-        # hand-maintained list that silently drifts out of sync (the drift that
-        # produced cost_usd=None across every open arm in the am-consistency run).
+        # WHY: Metering needs the same model registry as routing so a registered paid arm
+        # cannot silently lose cost capture.
         for model in ("minimax-m3", "glm-5.3-flash", "deepseek-v4-flash-0731"):
             self.assertTrue(
                 run.proxy_supported_for_cell("codex", model),
                 f"{model} should be proxy-meterable (it is in codex OPEN_MODELS)",
             )
-        # Subscription arms stay eligible; an unknown model stays ineligible.
         self.assertTrue(run.proxy_supported_for_cell("codex", "gpt-5.6-terra"))
         self.assertFalse(run.proxy_supported_for_cell("codex", "no-such-model"))
 
     def test_eligibility_forwards_custom_adapters_dir(self):
-        # A custom --adapters-dir may ship a codex.py whose OPEN_MODELS adds
-        # models absent from the packaged registry. The metering-eligibility
-        # check must load THAT adapter, so the selected adapters_dir has to reach
-        # _adapter_open_models -- otherwise a supported custom arm silently gets
-        # no proxy context and cost_usd stays None.
+        # WHY: A custom adapter can declare more models than the packaged registry. Resolve
+        # eligibility from the selected adapter.
         import types
         from unittest import mock
         seen = {}

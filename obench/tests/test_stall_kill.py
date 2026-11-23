@@ -33,8 +33,8 @@ class ProxyLivenessTrackingTests(unittest.TestCase):
             __import__("tempfile").TemporaryDirectory(prefix="stall_test_"))
         self.server = counting_proxy.make_server(
             "127.0.0.1", 0, self.tmpdir)
-        # shutdown() blocks until the serve_forever loop acknowledges it, so the
-        # loop MUST be running or tearDown deadlocks. Matches test_proxy.py.
+        # WHY: Server shutdown waits for the serving loop to acknowledge it, so the loop must
+        # be running before teardown.
         self.server_thread = threading.Thread(
             target=self.server.serve_forever, daemon=True)
         self.server_thread.start()
@@ -55,7 +55,6 @@ class ProxyLivenessTrackingTests(unittest.TestCase):
 
     def test_after_request_age_is_small(self):
         """After a completed request, last_activity_age is near zero."""
-        # Simulate a completed request by directly updating the ledger
         with self.server._ledger_condition:
             ledger = self.server._cell_ledgers.get("test-cell-1")
             ledger.last_activity_monotonic = time.monotonic()
@@ -91,7 +90,7 @@ class ProxyLivenessTrackingTests(unittest.TestCase):
         """complete_cell_request updates last_activity_monotonic."""
         with self.server._ledger_condition:
             ledger = self.server._cell_ledgers.get("test-cell-1")
-            ledger.in_flight = 1  # need in_flight > 0 for complete to work
+            ledger.in_flight = 1
         before = time.monotonic()
         self.server.complete_cell_request("test-cell-1", {"test": True})
         age = self.server.cell_last_activity_age("test-cell-1")
@@ -105,20 +104,17 @@ class StallWatchdogLogicTests(unittest.TestCase):
     def test_watchdog_fires_on_stale_ctx(self):
         """When proxy reports age >= stall_timeout, the event should be set."""
         proxy = mock.Mock()
-        proxy.cell_last_activity_age.return_value = 601.0  # >600 default
+        proxy.cell_last_activity_age.return_value = 601.0
         event = threading.Event()
         kill_called = []
 
         def kill_cb():
             kill_called.append(True)
 
-        # We can't easily test the thread without running it, but we can test
-        # the condition the thread checks directly.
         age = proxy.cell_last_activity_age("test")
         self.assertIsNotNone(age)
         self.assertGreaterEqual(age, 600)
 
-        # Simulate what the thread would do
         if age is not None and age >= 600:
             event.set()
             kill_cb()
@@ -129,7 +125,7 @@ class StallWatchdogLogicTests(unittest.TestCase):
     def test_watchdog_does_not_fire_on_active_ctx(self):
         """When proxy reports recent activity, the event should NOT be set."""
         proxy = mock.Mock()
-        proxy.cell_last_activity_age.return_value = 5.0  # 5s ago, within window
+        proxy.cell_last_activity_age.return_value = 5.0
         event = threading.Event()
         kill_called = []
 
@@ -140,7 +136,6 @@ class StallWatchdogLogicTests(unittest.TestCase):
         self.assertIsNotNone(age)
         self.assertLess(age, 600)
 
-        # Simulate what the thread would do
         if age is not None and age >= 600:
             event.set()
             kill_cb()
@@ -151,7 +146,7 @@ class StallWatchdogLogicTests(unittest.TestCase):
     def test_watchdog_noop_when_no_activity_yet(self):
         """When proxy returns None (no activity yet), watchdog should not fire."""
         proxy = mock.Mock()
-        proxy.cell_last_activity_age.return_value = None  # no activity yet
+        proxy.cell_last_activity_age.return_value = None
         event = threading.Event()
         kill_called = []
 
@@ -161,7 +156,6 @@ class StallWatchdogLogicTests(unittest.TestCase):
         age = proxy.cell_last_activity_age("test")
         self.assertIsNone(age)
 
-        # Age is None, so the condition is not met
         if age is not None and age >= 600:
             event.set()
             kill_cb()
@@ -191,9 +185,8 @@ class FailureClassStalledTests(unittest.TestCase):
 class StallTerminationTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux child subreaper")
     def test_success_waits_for_owned_descendant_to_be_reaped(self):
-        # Run the subreaper in a separate process so it cannot adopt children
-        # belonging to other tests. The fixture observes a real zombie and
-        # deliberately reaps it within the existing termination grace period.
+        # WHY: Run the subreaper as a separate process so it cannot adopt children from
+        # another test.
         fixture = pathlib.Path(__file__).parent / "fixtures/local_worker_delayed_reap.py"
         proc = subprocess.run([sys.executable, str(fixture)],
                               capture_output=True, text=True, timeout=10)
@@ -383,8 +376,8 @@ class StallTerminationTests(unittest.TestCase):
                     str(adapters),
                     5,
                     proxy_ctx=proxy_ctx,
-                    # The adapter must start and record its child before the
-                    # watchdog fires; 0.2s failed under CPU contention.
+                    # WHY: Leave time for the adapter to record the owned child before the
+                    # watchdog fires on a busy test host.
                     stall_timeout=1.0,
                     workspace_observer=lambda workdir: owned_pids.append(
                         int(pathlib.Path(workdir, "owned.pid").read_text())

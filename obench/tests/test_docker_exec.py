@@ -44,7 +44,6 @@ class TestBuildDockerCmd(unittest.TestCase):
             image="openbench-harness:latest",
             instruction_path="/tmp/instr.txt",
         )
-        # docker run --rm ... <image> python3 /bench/entry.py codex gpt-5.5-medium 240
         self.assertEqual(cmd[:3], ["docker", "run", "--rm"])
         self.assertEqual(cmd[-6], "openbench-harness:latest")
         self.assertEqual(cmd[-5:],
@@ -82,13 +81,11 @@ class TestBuildDockerCmd(unittest.TestCase):
             self.assertEqual(run.task_docker_spec(task), ("task:pinned", "/app"))
 
     def test_api_key_passthrough_by_name_only(self):
-        # A set key is forwarded as a bare `-e VAR` (docker reads the value
-        # from the client env; the secret never lands in argv); unset keys are
-        # not mentioned at all. Pass-through is scoped to the exact cell so
-        # unrelated agent containers cannot read extra credentials.
+        # WHY: Pass credential names through argv so their values are available to Docker
+        # without appearing in the process arguments.
         orig_env = dict(os.environ)
-        # deepseek-v4-flash routes through OpenRouter, so ITS key is the one
-        # that must be forwarded; the vendor key must not be.
+        # WHY: The routed model can also have native vendor credentials. Only its actual
+        # provider needs access inside the container.
         os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
         os.environ.pop("DEEPSEEK_API_KEY", None)
         os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
@@ -140,7 +137,7 @@ class TestBuildDockerCmd(unittest.TestCase):
         self.assertIn("ANTHROPIC_API_KEY=openbench-bridge-placeholder", codex_opus_cmd)
         self.assertNotIn("ANTHROPIC_API_KEY", codex_opus_cmd)
         self.assertNotIn("CURSOR_API_KEY", codex_opus_cmd)
-        self.assertIn("OPENROUTER_API_KEY", grokbuild_cmd)  # same routing on every harness
+        self.assertIn("OPENROUTER_API_KEY", grokbuild_cmd)
         self.assertNotIn("ANTHROPIC_API_KEY", grokbuild_cmd)
         self.assertNotIn("CURSOR_API_KEY", grokbuild_cmd)
         for argv in (cmd, claude_cmd, cursor_cmd, codex_opus_cmd, grokbuild_cmd):
@@ -163,12 +160,10 @@ class TestBuildDockerCmd(unittest.TestCase):
         self.assertFalse(any("secret-ingress-key" in arg for arg in cmd))
 
     def test_auth_mount_readonly_when_present(self):
-        # Use a fake HOME so the test is deterministic regardless of the host.
         home = tempfile.mkdtemp(prefix="fake_home_")
         try:
-            # codex mounts individual auth files, never the whole ~/.codex
-            # (which also holds multi-GB worktrees/sessions). codex_v1/v2 reuse
-            # that same staged auth and compose their own CODEX_HOME at runtime.
+            # WHY: Mount the individual auth files so the container cannot read unrelated
+            # sessions and workspace state.
             os.makedirs(os.path.join(home, ".codex"))
             with open(os.path.join(home, ".codex", "auth.json"), "w") as fh:
                 fh.write("{}")
@@ -253,8 +248,6 @@ class TestBuildDockerCmd(unittest.TestCase):
                     self.assertNotIn("DEEPSEEK_API_KEY", cmd)
 
     def test_grokbuild_mounts_only_grok_auth_file(self):
-        # The native xAI subscription lane (grok-4.5) needs ~/.grok/auth.json in
-        # the container; nothing else from ~/.grok may be mounted.
         home = tempfile.mkdtemp(prefix="fake_home_")
         try:
             os.makedirs(os.path.join(home, ".grok"))
@@ -556,7 +549,7 @@ class TestContainerCleanup(unittest.TestCase):
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
-            return FakeRunProc()  # rm -f / ps probe: container gone
+            return FakeRunProc()
 
         def fake_popen(cmd, **kwargs):
             calls.append(cmd)
@@ -598,7 +591,7 @@ class TestContainerCleanup(unittest.TestCase):
         self.assertIn("timeout", result["error"])
         self.assertEqual(result["output_tail"], "partial")
         self.assertTrue(fake_holder[0].terminated)
-        self.assertEqual(len(self._rm_calls(calls)), 2)  # watchdog + final sweep
+        self.assertEqual(len(self._rm_calls(calls)), 2)
         self.assertGreaterEqual(result["host_wall_time_s"], 0)
 
     def test_recovered_final_cleanup_preserves_timeout_result(self):
@@ -626,8 +619,6 @@ class TestContainerCleanup(unittest.TestCase):
         self.assertEqual(len(self._rm_calls(calls)), 1)
 
     def test_clean_return_also_sweeps_name(self):
-        # Even when `docker run --rm` exits normally, removal-by-name fires as
-        # a cheap no-op so a glitched --rm can't leave a wedged container.
         sentinel = docker_exec.RESULT_SENTINEL + ' {"completed": true}\n'
 
         calls = self._patch(
@@ -660,8 +651,6 @@ class TestContainerCleanup(unittest.TestCase):
             any(call[-1] == observed[0] for call in self._rm_calls(calls)))
 
     def test_force_remove_retries_until_gone(self):
-        # First rm leaves the container visible in `docker ps` (wedged CLI on a
-        # busy daemon); the retry succeeds.
         calls = []
 
         class FakeProc:
@@ -675,7 +664,7 @@ class TestContainerCleanup(unittest.TestCase):
             if cmd[:2] == ["docker", "ps"]:
                 if state["alive"]:
                     state["alive"] = False
-                    return FakeProc(stdout="abc123\n")  # still there
+                    return FakeProc(stdout="abc123\n")
                 return FakeProc()
             return FakeProc()
 
@@ -709,8 +698,6 @@ class TestInvokeAdapterFallback(unittest.TestCase):
 
 
     def test_docker_unavailable_falls_back_to_local(self):
-        # Force the docker backend to report unavailable; invoke_adapter should
-        # transparently run the fixture adapter locally and report exec="local".
         orig = docker_exec.run_in_container
 
         def boom(*a, **k):
@@ -788,7 +775,6 @@ class TestEntryRoundTrip(unittest.TestCase):
             )
         finally:
             os.unlink(instr_path)
-        # Extract the sentinel line.
         result = None
         for line in reversed(proc.stdout.splitlines()):
             if line.startswith(docker_exec.RESULT_SENTINEL):
@@ -809,7 +795,6 @@ class TestEntryRoundTrip(unittest.TestCase):
             shutil.rmtree(workdir, ignore_errors=True)
 
     def test_real_adapter_round_trip_writes_workdir(self):
-        # entry.py must run the real adapter against the mounted workdir.
         workdir = tempfile.mkdtemp(prefix="entry_fake_")
         try:
             proc, result = self._run_entry("fake_adapter", workdir)

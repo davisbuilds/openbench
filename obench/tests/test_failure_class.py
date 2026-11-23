@@ -138,12 +138,8 @@ class TestClassifyFailure(unittest.TestCase):
                          "silent-no-model-call")
 
     def test_incomplete_zero_work_run_is_infra_not_wrong_answer(self):
-        # Real shape from an OpenRouter provider-overload abandonment: the model
-        # answered "high demand / Reconnecting 1..5/5" for minutes, then exited
-        # with no work done. completed=False, no tokens/turns, workspace
-        # untouched, and it did NOT ride the cap (419s of a 2400s budget). The
-        # throttle text lives only in the transcript, not in any row field, so
-        # marker matching cannot see it -- the structural no-work shape must.
+        # WHY: A truncated result may omit the provider error. The empty work signals still
+        # distinguish an outage from a wrong answer.
         row = {"success": False, "completed": False, "checker_exit": 1,
                "tokens": None, "tokens_output": None, "turns": None,
                "workspace_changed": False, "wall_time_s": 419.68, "error": "exit 1"}
@@ -226,8 +222,6 @@ class TestClassifyFailure(unittest.TestCase):
             dict(row, error="timeout after 419s"), timeout_s=2400), "timeout")
 
     def test_incomplete_run_that_did_work_is_not_swallowed_as_infra(self):
-        # Guard: a cell cut off AFTER real model work (tokens/turns) must not be
-        # reclassified by the zero-work gate -- only genuine no-work runs are infra.
         row = {"success": False, "completed": False, "checker_exit": 1,
                "tokens": 500, "tokens_output": 200, "turns": 8, "wall_time_s": 419.0}
         self.assertNotEqual(failure_class.classify_failure(row, "", timeout_s=2400), "infra")
@@ -337,7 +331,7 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
             run.invoke_adapter, run.run_checker = orig_invoke, orig_checker
 
         self.assertNotIn("output_tail", run.ROW_FIELDS)
-        self.assertEqual(row["output_tail"], "tail without marker")  # internal only, not persisted
+        self.assertEqual(row["output_tail"], "tail without marker")
         self.assertEqual(row["failure_class"], "rate_limited")
 
     def test_runner_workspace_change_is_real_model_work_evidence(self):
@@ -425,9 +419,8 @@ class TestRunnerWriteTimeClassification(unittest.TestCase):
         self.assertEqual(failure_class.classify_failure(row), "infra")
 
     def test_task_debugging_traceback_with_real_work_is_wrong_answer(self):
-        # Regression: agents debugging Python tasks print tracebacks in their
-        # transcripts; a worked cell (tokens + turns) must never be reclassified
-        # as infra by the adapter-crash markers (10 raman-fitting cells were).
+        # WHY: A task can legitimately emit a traceback while the agent is working. That
+        # traceback alone does not establish infrastructure failure.
         row = {"success": False, "completed": True, "tokens": 35768, "turns": 16,
                "output_tail": "ran fit.py\nTraceback (most recent call last):\n  ...\nValueError: bad fit",
                "wall_time_s": 234.0, "checker_exit": 1}

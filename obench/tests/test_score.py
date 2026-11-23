@@ -32,7 +32,6 @@ class TestParseScore(unittest.TestCase):
         self.assertEqual(run.parse_score("SCORE: 0.1\nSCORE: 0.9"), 0.9)
 
     def test_malformed_ignored_falls_back_to_earlier(self):
-        # A trailing garbage SCORE line must not erase an earlier valid one.
         self.assertEqual(run.parse_score("SCORE: 0.4\nSCORE: oops"), 0.4)
         self.assertIsNone(run.parse_score("SCORE: nan?\nSCORE: xyz"))
 
@@ -93,18 +92,17 @@ class TestScoreCoercionE2E(unittest.TestCase):
 
     def test_partial_credit(self):
         r = self._row("partial-credit", "fake_adapter")
-        self.assertFalse(r["success"])       # nonzero exit
+        self.assertFalse(r["success"])
         self.assertEqual(r["checker_exit"], 1)
-        self.assertEqual(r["score"], 0.5)    # last parseable SCORE line
+        self.assertEqual(r["score"], 0.5)
 
     def test_exit0_coerces_score_to_one(self):
         r = self._row("full-despite-score", "fake_adapter")
         self.assertTrue(r["success"])
         self.assertEqual(r["checker_exit"], 0)
-        self.assertEqual(r["score"], 1.0)    # SCORE: 0.3 ignored on a pass
+        self.assertEqual(r["score"], 1.0)
 
     def test_null_partial_still_scores_from_checker(self):
-        # The checker owns the score even when the adapter does nothing.
         r = self._row("partial-credit", "null")
         self.assertFalse(r["success"])
         self.assertEqual(r["score"], 0.5)
@@ -113,7 +111,7 @@ class TestScoreCoercionE2E(unittest.TestCase):
     def test_version_stamped(self):
         r = self._row("write-marker", "versioned_adapter")
         self.assertEqual(r["harness_version"], "vfake-1.2.3")
-        self.assertEqual(r["score"], 1.0)    # solves it -> exit 0
+        self.assertEqual(r["score"], 1.0)
 
     def test_version_none_when_absent(self):
         r = self._row("write-marker", "fake_adapter")
@@ -122,7 +120,6 @@ class TestScoreCoercionE2E(unittest.TestCase):
 
 class TestRunCheckerTimeoutScore(unittest.TestCase):
     def test_timeout_scores_zero(self):
-        # slow-checker fixture sleeps 30s; a 1s checker-timeout -> score 0.0.
         tmp = tempfile.mkdtemp()
         results = os.path.join(tmp, "r.jsonl")
         proc = subprocess.run(
@@ -149,13 +146,11 @@ class TestReportMeanScore(unittest.TestCase):
         return out
 
     def test_mean_score_aggregation(self):
-        # A has explicit partial scores; averaged over ALL trials incl. failures.
         rows = self._rows([("A", False, 0.5), ("A", True, 1.0), ("A", False, 0.0)])
         _, _, stats = report.aggregate(rows)
-        self.assertAlmostEqual(report.mean(stats[("A", "-")]["scores"]), 0.5)  # (0.5+1+0)/3
+        self.assertAlmostEqual(report.mean(stats[("A", "-")]["scores"]), 0.5)
 
     def test_old_rows_derive_score_from_success(self):
-        # Rows lacking the field derive 1.0/0.0 from success (backward compat).
         rows = self._rows([("B", True, None), ("B", False, None)])
         _, _, stats = report.aggregate(rows)
         self.assertEqual(stats[("B", "-")]["scores"], [1.0, 0.0])
@@ -163,7 +158,7 @@ class TestReportMeanScore(unittest.TestCase):
     def test_mixed_old_and_new(self):
         rows = self._rows([("C", True, None), ("C", False, 0.25)])
         _, _, stats = report.aggregate(rows)
-        self.assertAlmostEqual(report.mean(stats[("C", "-")]["scores"]), 0.625)  # (1+0.25)/2
+        self.assertAlmostEqual(report.mean(stats[("C", "-")]["scores"]), 0.625)
 
     def test_tables_include_mscore(self):
         rows = self._rows([("A", False, 0.5), ("A", True, 1.0)])
@@ -172,7 +167,6 @@ class TestReportMeanScore(unittest.TestCase):
         eff = report.format_efficiency(arms, stats)
         self.assertIn("mscore", main)
         self.assertIn("mscore", eff)
-        # mean score 0.75 shows in both
         self.assertIn("0.75", main)
         self.assertIn("0.75", eff)
 

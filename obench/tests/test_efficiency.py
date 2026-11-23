@@ -36,14 +36,12 @@ class TestAggregation(unittest.TestCase):
                               (True, 700, 4, 14.0)])
         _, _, stats = report.aggregate(rows)
         st = stats[_arm("h")]
-        # None values are dropped, not stored as 0.
         self.assertEqual(st["token_vals"], [500, 700])
         self.assertEqual(st["turn_vals"], [2, 4])
         self.assertEqual(st["wall_times"], [10.0, 12.0, 14.0])
         self.assertEqual(st["succ"], 3)
 
     def test_booleans_not_counted_as_numbers(self):
-        # success is a bool; it must never leak into token/turn aggregation.
         rows = rows_for("h", [(True, None, None, 1.0)])
         _, _, stats = report.aggregate(rows)
         self.assertEqual(stats[_arm("h")]["token_vals"], [])
@@ -65,10 +63,9 @@ class TestPerSolveMetrics(unittest.TestCase):
     def test_tokens_per_solve_basic(self):
         _, _, stats = report.aggregate(rows_for("h", [
             (True, 100, None, 1.0), (True, 200, None, 1.0), (True, 300, None, 1.0)]))
-        self.assertEqual(report.tokens_per_solve(stats[_arm("h")]), 200.0)  # 600/3
+        self.assertEqual(report.tokens_per_solve(stats[_arm("h")]), 200.0)
 
     def test_tokens_per_solve_mixed_none(self):
-        # Only non-null tokens summed; denominator is solves.
         _, _, stats = report.aggregate(rows_for("h", [
             (True, 500, None, 1.0), (True, None, None, 1.0), (True, 700, None, 1.0)]))
         self.assertAlmostEqual(report.tokens_per_solve(stats[_arm("h")]), 1200 / 3)
@@ -79,7 +76,6 @@ class TestPerSolveMetrics(unittest.TestCase):
         self.assertIsNone(report.tokens_per_solve(stats[_arm("h")]))
 
     def test_tokens_per_solve_zero_solves_is_none(self):
-        # Tokens reported but nothing solved -> cannot normalise per solve.
         _, _, stats = report.aggregate(rows_for("h", [
             (False, 900, None, 1.0), (False, 100, None, 1.0)]))
         self.assertIsNone(report.tokens_per_solve(stats[_arm("h")]))
@@ -87,7 +83,7 @@ class TestPerSolveMetrics(unittest.TestCase):
     def test_turns_per_solve(self):
         _, _, stats = report.aggregate(rows_for("h", [
             (True, None, 3, 1.0), (True, None, 5, 1.0)]))
-        self.assertEqual(report.turns_per_solve(stats[_arm("h")]), 4.0)  # 8/2
+        self.assertEqual(report.turns_per_solve(stats[_arm("h")]), 4.0)
 
 
 class TestSummaryStats(unittest.TestCase):
@@ -98,7 +94,6 @@ class TestSummaryStats(unittest.TestCase):
     def test_ci_halfwidth_needs_two(self):
         self.assertIsNone(report.ci_halfwidth([]))
         self.assertIsNone(report.ci_halfwidth([5.0]))
-        # sd of [10,20] = 7.071..., hw = 1.96*7.071/sqrt(2) ~= 9.8
         self.assertAlmostEqual(report.ci_halfwidth([10.0, 20.0]), 9.8, places=1)
 
 
@@ -115,7 +110,6 @@ class TestFormatters(unittest.TestCase):
 
 class TestTables(unittest.TestCase):
     def _mixed(self):
-        # Harness A reports tokens+turns; harness B reports neither.
         rows = (rows_for("A", [(True, 1000, 2, 10.0), (True, 2000, 4, 20.0)], task="t1")
                 + rows_for("B", [(True, None, None, 5.0), (True, None, None, 7.0)], task="t1"))
         return report.aggregate(rows)
@@ -126,10 +120,8 @@ class TestTables(unittest.TestCase):
         for h in ("harness", "model", "wilson95", "mean_s", "tok/slv", "turns"):
             self.assertIn(h, text)
         lines = {ln.split()[0]: ln for ln in text.splitlines() if ln[:1] in "AB"}
-        # A: tokens/solve = 3000/2 = 1500 -> "1.5k"; mean turns = 3.0
         self.assertIn("1.5k", lines["A"])
         self.assertIn("3.0", lines["A"])
-        # B: no token/turn data -> "-" in both slots, never "0"
         self.assertRegex(lines["B"], r"\bB\b.*-\s+-\s*$")
 
     def test_efficiency_table_mixed_and_ci(self):
@@ -140,10 +132,10 @@ class TestTables(unittest.TestCase):
             self.assertIn(h, text)
         rowA = next(l for l in text.splitlines() if l.startswith("A"))
         rowB = next(l for l in text.splitlines() if l.startswith("B"))
-        self.assertIn("1.5k", rowA)          # tokens/solve
-        self.assertIn("±", rowA)             # mean_s carries a CI half-width
-        self.assertNotIn("k", rowB)          # B has no token figure
-        self.assertTrue(rowB.rstrip().endswith("-"))  # turns/solve dash for B
+        self.assertIn("1.5k", rowA)
+        self.assertIn("±", rowA)
+        self.assertNotIn("k", rowB)
+        self.assertTrue(rowB.rstrip().endswith("-"))
 
 
 class TestProxyTokenBasis(unittest.TestCase):
@@ -245,8 +237,8 @@ class TestProxyTokenBasis(unittest.TestCase):
         ]
         arms, _tasks, stats = report.aggregate(rows)
         text = report.format_efficiency(arms, stats)
-        self.assertIn("1.0k", text)   # pi self-reported, no star
-        self.assertIn("500*", text)   # aider proxy
+        self.assertIn("1.0k", text)
+        self.assertIn("500*", text)
         self.assertIn(report.MIXED_BASIS_WARNING, text)
 
     def test_unmetered_stays_dash(self):
@@ -286,13 +278,11 @@ class TestReportBuilders(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_build_report_unchanged_contains_wilson(self):
-        # Regression guard: the success table still carries the Wilson header.
         self.assertIn("wilson95", report.build_report(self.path))
 
     def test_build_efficiency_report(self):
         text = report.build_efficiency_report(self.path)
         self.assertIn("turns/slv", text)
-        # codexlike tokens/solve = 90000/2 = 45000 -> "45.0k"; quiet -> "-"
         self.assertIn("45.0k", text)
         quiet = next(l for l in text.splitlines() if l.startswith("quiet"))
         self.assertNotIn("k", quiet)
