@@ -30,14 +30,12 @@ from .validate_tasks import effective_score, parse_score, run_checker
 IMPORTER_NAME = "obench import harbor"
 HARBOR_SCHEMA_HINT = "1.3"
 
-# Instruction text that leaks Harbor grading internals is rejected.
 _INSTRUCTION_BANNED = re.compile(
     r"/logs/verifier|reward\.(txt|json)",
     re.IGNORECASE,
 )
 
-# solve.sh content that likely needs container/network — skip auto materialize.
-# Avoid bare words like "network" (comments) or "pip" inside "pipefail".
+# WHY: Common shell option names and comments are not evidence that the solution needs Docker.
 _SOLVE_UNSAFE = re.compile(
     r"(?i)(\bcurl\b|\bwget\b|\bdocker\b|\bpodman\b|\bapt-get\b|\bapk\s+add\b"
     r"|\bpip3?\s+install\b|\bnpm\s+install\b|\byarn\s+add\b"
@@ -56,7 +54,6 @@ _FROM_RE = re.compile(r"^\s*FROM\s+(\S+)", re.IGNORECASE)
 _WORKDIR_RE = re.compile(r"^\s*WORKDIR\s+(\S+)", re.IGNORECASE)
 _RUN_RE = re.compile(r"^\s*RUN\b", re.IGNORECASE)
 _STAGE_AS_RE = re.compile(r"\s+AS\s+(\S+)\s*$", re.IGNORECASE)
-# Harbor agent workdir paths in solve.sh / tests (rewrite for local materialize).
 _HARBOR_ABS_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_])/app(?=/|[\"']|$|\s)"
 )
@@ -72,7 +69,8 @@ class DockerfileAnalysis:
 
     base_image: str | None = None
     workdir: str = "/app"
-    copy_ops: list[tuple[str, str]] = field(default_factory=list)  # (src, dest)
+    #: Ordered source and destination paths for each COPY or ADD.
+    copy_ops: list[tuple[str, str]] = field(default_factory=list)
     docker_required: bool = False
     reasons: list[str] = field(default_factory=list)
     packages_hint: list[str] = field(default_factory=list)
@@ -92,7 +90,8 @@ class ImportResult:
     schema_version: str | None = None
     source_path: str = ""
     error: str | None = None
-    validated: bool | None = None  # polarity when solution present
+    #: Checker polarity when the task has a reference solution.
+    validated: bool | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -250,17 +249,16 @@ def parse_dockerfile(dockerfile_text: str) -> DockerfileAnalysis:
     """
     analysis = DockerfileAnalysis()
     from_count = 0
-    current_workdir = "/app"  # Harbor / TB convention when WORKDIR omitted early
+    current_workdir = "/app"
     for line in _iter_dockerfile_logical_lines(dockerfile_text):
         m_from = _FROM_RE.match(line)
         if m_from:
             from_count += 1
             image = m_from.group(1)
-            # Scratch/builder stages after the first mark multi-stage.
             if from_count == 1:
                 analysis.base_image = image.split(" AS ")[0].split(" as ")[0]
-                # Docker default WORKDIR is "/"; Harbor tasks nearly always
-                # set WORKDIR /app — keep /app as staging default until seen.
+                # WHY: Harbor exports assume /app. Retain that staging default until the
+                # Dockerfile supplies a working directory.
                 current_workdir = "/app"
                 analysis.workdir = "/app"
             else:
@@ -282,7 +280,6 @@ def parse_dockerfile(dockerfile_text: str) -> DockerfileAnalysis:
         if _RUN_RE.match(line):
             analysis.docker_required = True
             analysis.reasons.append(f"RUN directive: {line[:80]}")
-            # Rough package hints for REQUIREMENTS.md (stop at shell separators).
             for pkg in re.findall(
                 r"(?:apt-get\s+install\s+(?:-y\s+)?|apk\s+add\s+(?:--no-cache\s+)?)"
                 r"([^;&\n]+)",
@@ -307,8 +304,6 @@ def parse_dockerfile(dockerfile_text: str) -> DockerfileAnalysis:
                 analysis.docker_required = True
                 analysis.reasons.append(f"{kind} --from= (multi-stage artifact)")
                 continue
-            # Shell-style tokens; last is dest, earlier are sources.
-            # Ignore JSON-form COPY for simplicity → mark docker-required.
             if rest.startswith("["):
                 analysis.docker_required = True
                 analysis.reasons.append(f"JSON-form {kind} not auto-staged")
@@ -319,7 +314,6 @@ def parse_dockerfile(dockerfile_text: str) -> DockerfileAnalysis:
                 analysis.reasons.append(f"unparseable {kind}: {line[:80]}")
                 continue
             dest_raw = parts[-1]
-            # Resolve relative dests (., ./, foo) against WORKDIR at this line.
             dest = _resolve_container_path(dest_raw, current_workdir)
             sources = parts[:-1]
             for src in sources:
@@ -330,8 +324,6 @@ def parse_dockerfile(dockerfile_text: str) -> DockerfileAnalysis:
                 analysis.copy_ops.append((src, dest))
             continue
 
-        # Other directives (ENV, USER, EXPOSE, …) are usually fine; compose
-        # hints and privileged bits escalate.
         if re.match(r"^\s*(ENTRYPOINT|CMD|VOLUME)\b", line, re.IGNORECASE):
             analysis.docker_required = True
             analysis.reasons.append(f"{line.split()[0]} directive present")
@@ -382,7 +374,6 @@ def stage_workspace_from_dockerfile(
             analysis.reasons.append(f"COPY source missing: {src_rel}")
             continue
         if os.path.isdir(src_path):
-            # COPY dir/ dest/ → contents when dest is a directory path.
             dest_norm = dest.rstrip("/") if dest != "/" else "/"
             if dest_is_dir or dest.endswith("/") or not rel or dest_norm in (
                 workdir, "/app",
@@ -394,7 +385,6 @@ def stage_workspace_from_dockerfile(
                 shutil.copytree(src_path, target)
             staged_any = True
         else:
-            # File → directory dest keeps basename (Docker COPY semantics).
             if not rel or dest_is_dir or dest.endswith("/"):
                 os.makedirs(target if rel else workspace_dest, exist_ok=True)
                 dest_file = os.path.join(
@@ -408,7 +398,6 @@ def stage_workspace_from_dockerfile(
             staged_any = True
 
     if not staged_any:
-        # Fallback: if environment/app exists (OpenBench export shape), use it.
         app = os.path.join(env_dir, "app")
         if os.path.isdir(app):
             _copy_tree_contents(app, workspace_dest)
@@ -417,9 +406,6 @@ def stage_workspace_from_dockerfile(
                 "staged workspace from environment/app/ (COPY sources empty/missing)"
             )
         else:
-            # Empty agent workspace is common for TB tasks that create files
-            # from scratch — note it, but do not escalate to DOCKER-REQUIRED
-            # unless other Dockerfile complexity already did.
             analysis.reasons.append(
                 "no local COPY/ADD sources staged into workspace "
                 "(empty agent workspace — agent creates files from scratch)"
@@ -554,7 +540,6 @@ def solve_sh_is_safe_to_run(solve_text: str) -> tuple[bool, str]:
     """Conservative gate: refuse scripts that look like they need network/docker."""
     if _SOLVE_UNSAFE.search(solve_text):
         return False, "solve.sh references network/package/container tooling"
-    # Heredoc-only file writers and cp/mv/sed/echo are OK.
     return True, ""
 
 
@@ -570,7 +555,8 @@ def _rewrite_harbor_paths_for_local(
     those at the materialization sandbox workspace instead.
     """
     local_root = os.path.abspath(local_root)
-    # Longer prefixes first so /app/personal-site wins over /app.
+    # WHY: Resolve more specific container paths first so a short root cannot shadow a nested
+    # workdir.
     prefixes: list[str] = []
     for prefix in (harbor_workdir.rstrip("/") or "/app", "/app"):
         if prefix not in prefixes:
@@ -582,7 +568,6 @@ def _rewrite_harbor_paths_for_local(
         if prefix == "/app":
             out = _HARBOR_ABS_PATH_RE.sub(lambda _m: local_root, out)
             continue
-        # Escape for regex; require path boundary after the prefix.
         pat = re.compile(
             r"(?<![A-Za-z0-9_])"
             + re.escape(prefix)
@@ -641,16 +626,11 @@ def materialize_solution_from_harbor(
 
     sandbox = tempfile.mkdtemp(prefix="obench_harbor_solve_")
     try:
-        # Snapshot before/after relative to a copy of the workspace.
         work = os.path.join(sandbox, "work")
         shutil.copytree(workspace_dir, work)
         before = _file_fingerprint_tree(work)
-        # Also expose Harbor solution dir like Harbor does (/solution).
         sol_mount = os.path.join(sandbox, "solution")
         shutil.copytree(sol_src, sol_mount)
-        # TB/Harbor solve.sh often writes absolute `/app/...` paths. Rewrite
-        # those (and the Dockerfile WORKDIR if different) onto the sandbox
-        # workspace so materialization works without Docker.
         harbor_workdir = "/app"
         df_path = os.path.join(harbor_task_dir, "environment", "Dockerfile")
         if os.path.isfile(df_path):
@@ -684,7 +664,6 @@ def materialize_solution_from_harbor(
             ]
         after = _file_fingerprint_tree(work)
         changed = sorted(set(after) - set(before))
-        # Also include files whose content changed.
         for rel in set(before) & set(after):
             if before[rel] != after[rel]:
                 changed.append(rel)
@@ -844,7 +823,6 @@ def is_harbor_task_dir(path: str) -> bool:
         return False
     if not os.path.isfile(os.path.join(path, "tests", "test.sh")):
         return False
-    # Dockerfile or task.toml — either signals Harbor layout.
     env_df = os.path.join(path, "environment", "Dockerfile")
     return os.path.isfile(env_df) or os.path.isfile(os.path.join(path, "task.toml"))
 
@@ -852,7 +830,6 @@ def is_harbor_task_dir(path: str) -> bool:
 def discover_harbor_tasks(from_spec: str) -> list[str]:
     """Resolve ``--from`` dir / glob to Harbor task directories."""
     matches: list[str] = []
-    # Expand globs; also accept a plain directory.
     expanded = sorted(_glob.glob(from_spec)) if any(
         ch in from_spec for ch in "*?[]"
     ) else [from_spec]
@@ -868,7 +845,6 @@ def discover_harbor_tasks(from_spec: str) -> list[str]:
             candidates.append(item)
             continue
         if os.path.isdir(item):
-            # Immediate children first, then one-level nesting (dataset packs).
             for name in sorted(os.listdir(item)):
                 child = os.path.join(item, name)
                 if is_harbor_task_dir(child):
@@ -881,7 +857,6 @@ def discover_harbor_tasks(from_spec: str) -> list[str]:
         else:
             raise HarborImportError(f"--from is not a Harbor task or directory: {item}")
 
-    # De-dupe preserving order.
     seen: set[str] = set()
     for c in candidates:
         key = os.path.abspath(c)
@@ -948,7 +923,8 @@ def import_task(
             result.needs_manual_attention.append("DOCKER-REQUIRED")
             result.notes.extend(analysis.reasons)
 
-        # Harbor tests → checker-owned data (not agent workspace).
+        # WHY: Keep the verifier out of the staged workspace so agents cannot read its grading
+        # inputs.
         tests_src = os.path.join(harbor_task_dir, "tests")
         tests_dest = os.path.join(out_dir, "checker_data", "harbor-tests")
         if os.path.isdir(tests_src):
@@ -969,7 +945,6 @@ def import_task(
         result.notes.extend(sol_notes)
         if not materialized:
             result.needs_manual_attention.append("needs-manual-solution")
-            # Remove empty solution/ if we created nothing.
             if os.path.isdir(solution_dest) and not any(
                 os.path.isfile(os.path.join(r, f))
                 for r, _d, files in os.walk(solution_dest)
@@ -998,7 +973,6 @@ def import_task(
                 render_requirements_md(analysis),
             )
 
-        # Lightweight marker for tooling.
         marker = {
             "importer": IMPORTER_NAME,
             "obench_version": __version__,

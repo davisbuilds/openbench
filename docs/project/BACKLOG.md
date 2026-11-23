@@ -22,6 +22,16 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
+### Stage JSON-form COPY and ADD in the Harbor importer
+
+- **What:** `obench/import_harbor.py` `parse_dockerfile` sends JSON-form
+  `COPY` and `ADD` instructions to Docker even for local files.
+- **Evidence:** The parser can stage the equivalent shell-form instructions
+  with local sources. JSON form currently makes those otherwise portable
+  tasks require Docker.
+- **Next:** Parse the argument list and send valid local sources through the
+  existing staging checks. Cover malformed arguments and task polarity.
+
 ### Qualify browser CLI video recording
 
 - **What:** both locked Playwright cores now declare and install FFmpeg 1013,

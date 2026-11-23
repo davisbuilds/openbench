@@ -157,11 +157,8 @@ def aggregate(rows):
             )
         fc = class_for_report(row)
         st["taxonomy"][fc] = st["taxonomy"].get(fc, 0) + 1
-        # Coverage: a (task, trial) cell is PLANNED as soon as any row exists for
-        # it (excluded rows carry their trial index, so a fully rate-limited cell
-        # still proves it was attempted) and SATISFIED only once some attempt
-        # produced a countable verdict. Tracking distinct cells rather than row
-        # counts keeps retries from inflating either side.
+        # WHY: Count distinct cells because retries are not additional attempts at coverage.
+        # Excluded rows still prove the cell was attempted.
         cell = comparison_cell_key(
             row,
             require_harbor_identity=False,
@@ -179,8 +176,8 @@ def aggregate(rows):
             pt[0] += 1
             st["succ"] += 1
 
-        # Score is the partial-credit signal, averaged over all countable trials incl.
-        # failures. Rows predating the field derive it from success (1.0/0.0).
+        # WHY: Historical rows lack partial credit, so fall back to the original binary
+        # verdict.
         sc = row.get("score")
         if not isinstance(sc, (int, float)) or isinstance(sc, bool):
             sc = 1.0 if success else 0.0
@@ -207,11 +204,8 @@ def aggregate(rows):
     return arms, tasks, stats
 
 
-# --- derived per-arm metrics (each returns None when undefined) -------------- #
-# Below this fraction of planned cells returning a countable verdict, an arm's
-# solve rate describes a self-selected subset rather than the task set. Rate
-# limits and infra failures hit LONG-running cells hardest, and long cells are
-# the hard ones, so incomplete coverage biases solve rates UPWARD.
+# WHY: Selective infra failures and rate limits remove harder long-running cells, biasing
+# reported solve rates until coverage is high.
 COVERAGE_PUBLISH_THRESHOLD = 0.95
 
 
@@ -235,11 +229,8 @@ def _one_row_per_cell(rows):
         task = row.get("task")
         if key is None or task is None:
             continue
-        # A cell is (arm, task, trial). Without a trial there is no cell
-        # identity, so two such rows cannot be shown to be the same attempt --
-        # keep them distinct rather than silently merging unrelated results.
-        # Every row in the current corpus carries a trial (3875/3875), so this
-        # only guards older or hand-written data.
+        # WHY: Rows without trial IDs cannot be proven to share a cell. Do not silently merge
+        # them.
         trial = row.get("trial")
         cell = (
             (key, *comparison_cell_key(
@@ -333,7 +324,6 @@ def table_has_mixed_token_bases(stats, arms):
     return len(seen) > 1
 
 
-# --- cell formatters --------------------------------------------------------- #
 def _fmt_tokens(v, proxy_mark=False):
     """Compact token count: '-' for None, 'N' below 1k, else 'X.Yk'; optional *."""
     if v is None:
