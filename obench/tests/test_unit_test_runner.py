@@ -30,7 +30,8 @@ class ReportTests(unittest.TestCase):
         self.assertIsNotNone(report(0, 'no unittest summary\n', 1)['problem'])
 
     def test_last_summary_wins_over_test_output(self):
-        # A test may print a nested runner's summary before the module's own.
+        # WHY: A module can print a nested runner summary before its own, so the parser must
+        # use the final summary.
         output = 'Ran 9 tests in 0.0s\n\nOK\n...\nRan 1 test in 0.2s\n\nOK\n'
         self.assertIsNone(report(0, output, 1)['problem'])
 

@@ -67,8 +67,8 @@ class FrozenContextTests(unittest.TestCase):
         fifo = self.source / 'resources/fifo'
         fifo.parent.mkdir()
         os.mkfifo(fifo)
-        # Separate process bounds the regression: blocking open used to wait
-        # forever before checking that this was not a regular file.
+        # WHY: Run the probe in a child so a regression that opens the FIFO before checking
+        # its type cannot hang the test runner.
         import sys
         result = subprocess.run([sys.executable, '-m', 'obench.frozen_context',
                                  'context', str(self.source), '--output', str(self.root/'bad.tar')],
@@ -130,8 +130,6 @@ class FrozenContextTests(unittest.TestCase):
         write(message('assistant', evidence))
         with self.assertRaisesRegex(ValueError, 'global guidance'):
             verify_session_context(sessions, loaded)
-        # A quoted path or even a quoted catalog in user guidance is not the
-        # harness-generated catalog. Wrong roots and later echoes also fail.
         for messages in (
             [message('user', evidence)],
             [message('user', evidence + '\n' + catalog)],

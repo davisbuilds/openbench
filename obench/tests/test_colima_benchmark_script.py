@@ -164,8 +164,8 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
         self.assertEqual(self.colima_calls(calls, "start"), [])
 
     def test_default_profile_runs_are_told_to_select_its_context(self):
-        # The checks above pin the colima context; a run that inherits another
-        # active context would use a daemon those checks never saw.
+        # WHY: A tested VM does not establish which daemon an inherited Docker context would
+        # reach.
         self.running("default", 4, 12)
         result, _ = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -232,7 +232,6 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
         self.assertIn("--disk 100", start)
 
     def test_profile_aliases_resolve_as_colima_does(self):
-        # colima treats "colima" as the default profile and strips "colima-".
         self.running("openbench", 4, 12)
         result, calls = self.run_script("--profile", "colima-openbench")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -250,7 +249,6 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         (start,) = self.colima_calls(calls, "start")
         self.assertIn("--profile openbench", start)
-        # Starting a second profile must not take over the current context.
         self.assertIn("--activate=false", start)
         for call in calls:
             if call.startswith(("colima start", "colima stop", "colima status")):
@@ -281,7 +279,8 @@ class ColimaBenchmarkScriptTest(unittest.TestCase):
         self.assertIn("brew services start colima", calls)
 
     def test_autostart_refuses_a_named_profile(self):
-        # brew's colima service starts only the default profile.
+        # WHY: Homebrew’s service starts the default VM. Starting it cannot satisfy a named
+        # profile request.
         self.stopped()
         result, calls = self.run_script("--profile", "openbench", "--autostart")
         self.assertNotEqual(result.returncode, 0)

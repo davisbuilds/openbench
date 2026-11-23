@@ -34,7 +34,7 @@ class RuntimeAdmissionTests(unittest.TestCase):
         self.assertTrue(all(a.agent.n_concurrent==2 for a in compiled.arms))
         control,_=admission.prepare_control(compiled,self.root/'parallel-control')
         self.assertEqual(control.suite.run.concurrency,2)
-        self.assertEqual(control.suite.run.attempts,2) # one model still exercises two simultaneous trials
+        self.assertEqual(control.suite.run.attempts,2)
 
     def test_control_is_separate_bounded_and_resealed(self):
         self.assertNotEqual(self.control.manifest_sha256,self.compiled.manifest_sha256)
@@ -59,8 +59,8 @@ class RuntimeAdmissionTests(unittest.TestCase):
                 row['candidate_provenance'].update(sandbox_grading_sha256='c'*64,
                     sandbox_gateway_module_sha256=self.control.manifest['sandbox']['implementation_sha256']['obench.sandbox_gateway'])
             return rows
-        # Only the external Harbor interpreter/process is simulated. The suite,
-        # plan, rows, result files and manifest sealing/verification are real.
+        # WHY: Only substitute the Harbor process so this control still exercises real suite
+        # sealing and validation.
         with patch.object(suite_run,'_verify_sandbox_runtime'):
             result=fixture._run_simulated(self.control,importer=imported)
         image=self.control.suite.sandbox.runtime_image
@@ -176,8 +176,6 @@ class RuntimeAdmissionTests(unittest.TestCase):
         records = admission.model_control_records(expected)
         commands = []
         def offline(command, **kwargs):
-            # The actual CLI/control runner is expensive and separately covered
-            # by Docker CI. Record its emitted argv and supply synthetic receipts.
             if len(command)>1 and command[1] == admission.SCRIPTS[1]:
                 commands.append(command)
                 alias = command[command.index('--model')+1]

@@ -49,8 +49,6 @@ def _row(replies, cap, **kw):
 
 class PerReplyTruncationTests(unittest.TestCase):
     def test_multi_turn_run_over_the_cap_in_total_is_NOT_truncated(self):
-        # THE false positive that was published twice: 5 replies of 7000 sum to
-        # 35000 > 32768, but no single reply came close to the cap.
         row = _row([7000] * 5, 32768)
         self.assertGreater(row["tokens_output"], 32768)
         self.assertFalse(fc.has_per_reply_truncation(row))
@@ -117,8 +115,7 @@ class NoUnitMismatchInSourceTests(unittest.TestCase):
             f"failure_class.has_per_reply_truncation() instead.")
 
     def test_the_guard_actually_catches_the_bug(self):
-        # Negative control for the AST check itself, so it cannot silently
-        # degrade into a test that passes on everything.
+        # WHY: Use a known failing mutation so a broken source guard cannot pass vacuously.
         import tempfile
         bad = ("def f(row, cap):\n"
                "    return row['tokens_output'] >= row['max_completion_tokens']\n")
@@ -136,15 +133,12 @@ class CapEnforcementTests(unittest.TestCase):
     """No truncation claim where the cap is demonstrably not enforced."""
 
     def test_reply_exceeding_its_cap_yields_no_claim(self):
-        # deepseek: a 17096-token reply against an 8192 cap. The cap is not
-        # binding on that route, so a reply "at the cap" means nothing.
         self.assertFalse(fc.has_per_reply_truncation(_row([500, 17096], 8192)))
 
     def test_enforced_cap_still_detects_truncation(self):
         self.assertTrue(fc.has_per_reply_truncation(_row([500, 32768], 32768)))
 
     def test_the_check_is_per_cell_not_global(self):
-        # One model overshooting must not suppress detection for another cell.
         self.assertFalse(fc.has_per_reply_truncation(_row([9000], 8192)))
         self.assertTrue(fc.has_per_reply_truncation(_row([8192], 8192)))
 

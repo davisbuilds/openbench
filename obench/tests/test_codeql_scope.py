@@ -27,8 +27,7 @@ class CodeQLScopeTests(unittest.TestCase):
     def setUp(self):
         config = CONFIG.read_text()
         self.workflow = WORKFLOW.read_text()
-        # Read only the quoted rooted-path subset used by this config. Its **
-        # patterns match the paths below; this is not a general YAML parser.
+        # WHY: Limit the fixture to the rooted path syntax actually used by the configuration.
         entries = config.split('paths-ignore:\n', 1)[1]
         self.ignored = []
         for line in entries.splitlines():

@@ -55,16 +55,12 @@ class TestTranscripts(unittest.TestCase):
                         f"expected a transcript at {path}")
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-        # full_output is preferred over output_tail.
         self.assertIn("FULL_TRANSCRIPT_BEGIN", text)
         self.assertIn("FULL_TRANSCRIPT_END", text)
-        # Header carries provenance + the local-only warning.
         self.assertIn(run_id, text)
         self.assertIn("LOCAL-ONLY", text)
 
     def test_transcript_falls_back_to_output_tail(self):
-        # The null adapter reports no full_output and an empty output_tail; the
-        # transcript is still written (header only, empty body).
         tdir = os.path.join(self.tmp, "transcripts")
         self._run("null", transcripts_dir=tdir)
 
@@ -77,8 +73,6 @@ class TestTranscripts(unittest.TestCase):
         self.assertNotIn("FULL_TRANSCRIPT_BEGIN", text)
 
     def test_default_location_is_results_sibling(self):
-        # With no --transcripts-dir, transcripts land in a transcripts/ sibling
-        # of the results log, under a subdir named for the results-file stem.
         self._run("fake_adapter")
         run_id = "fake_adapter:write-marker:gpt-5.5-medium:trial1"
         expected = run.transcript_path(
@@ -87,8 +81,6 @@ class TestTranscripts(unittest.TestCase):
                         f"expected default transcript at {expected}")
 
     def test_filename_sanitizes_run_id(self):
-        # run_id colons must become filesystem-safe; the path must not contain
-        # a raw ':' separator in its basename.
         run_id = "codex:some-task:gpt-5.5-medium:trial3"
         path = run.transcript_path("/tmp/base", "results", run_id)
         self.assertNotIn(":", os.path.basename(path))

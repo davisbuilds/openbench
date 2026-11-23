@@ -183,7 +183,8 @@ class ProxyResponseHeadersTests(unittest.TestCase):
                 conn.request("POST", path, b"{}")
                 resp = conn.getresponse()
                 self.assertEqual(resp.status, 200)
-                # Upstream cannot finish until the client observes the first data.
+                # WHY: Withhold upstream completion until the client reads the first bytes. A
+                # buffering proxy would otherwise pass.
                 self.assertEqual(resp.read(5), b"hello")
                 self.assertFalse(release.is_set())
                 release.set()

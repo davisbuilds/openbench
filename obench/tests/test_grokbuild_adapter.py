@@ -52,7 +52,7 @@ class TestStreamParsing(unittest.TestCase):
         with open(FIXTURE_PATH, encoding="utf-8") as fh:
             stdout = fh.read()
         tokens, turns, tail = grokbuild._parse_stream(stdout)
-        self.assertIsNone(tokens)  # usage is not present in streaming-json events
+        self.assertIsNone(tokens)
         self.assertEqual(turns, 1)
         self.assertEqual(tail, "OK")
 
@@ -275,7 +275,6 @@ class TestRunConstruction(unittest.TestCase):
                     "ZAI_API_KEY": "zai-test",
                     "MOONSHOT_API_KEY": "moonshot-test",
                     "CLIPROXYAPI_API_KEY": "ob-test-synthetic-ingress",
-                    # This sentinel must be stripped from the gpt-5.6 child.
                     "OPENAI_API_KEY": "must-not-reach-subbridge",
                 })
                 for model in ("deepseek-v4-flash", "glm-5.2", "kimi-k2.7-code", "gpt-5.6-sol"):
@@ -393,7 +392,8 @@ class TokenBasisLabelTests(unittest.TestCase):
         self.assertEqual(usage["token_basis"], "vendor_split")
 
     def test_cache_read_exceeding_prompt_downgrades(self):
-        # max(0, prompt - cached) would otherwise absorb this silently.
+        # WHY: Clamping a negative count would hide inconsistent provider data that cannot
+        # support exact usage claims.
         usage = grokbuild._parse_log_usage(self._home(
             {"prompt_tokens": 100, "cached_prompt_tokens": 140,
              "completion_tokens": 7}))

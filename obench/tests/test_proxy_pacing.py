@@ -40,9 +40,8 @@ class ProxyPacingTests(unittest.TestCase):
         self.assertLess(time.monotonic() - t0, 0.05)
 
     def test_gap_is_shared_across_threads_not_per_thread(self):
-        # The forensic finding is about AGGREGATE rate: concurrent cells
-        # retrying in lockstep created the thundering herd. Two threads must
-        # share one clock.
+        # WHY: Per-thread limits multiply the aggregate request rate. All callers need to
+        # share one pacing clock.
         stamps = []
         def hit():
             proxy_mod._pace_upstream("throttled.example")

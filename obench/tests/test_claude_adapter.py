@@ -30,8 +30,8 @@ claude = _load_claude()
 
 class TestParseJson(unittest.TestCase):
     def test_model_usage_disjoint_fresh_basis(self):
-        # Anthropic-style fields are DISJOINT: fresh = input + cacheCreation +
-        # output; cacheRead excluded. modelUsage is preferred over usage.
+        # WHY: The provider reports cache reads separately. Counting them as fresh tokens
+        # would compare different measures.
         payload = (
             '{"type":"result","is_error":false,"num_turns":3,'
             '"result":"all done",'
@@ -41,7 +41,7 @@ class TestParseJson(unittest.TestCase):
             '"cacheCreationInputTokens":10}}}'
         )
         tokens, turns, tail, ok, usage = claude._parse_json_with_usage(payload)
-        self.assertEqual(tokens, 140)  # legacy scalar = input + output
+        self.assertEqual(tokens, 140)
         self.assertEqual(usage["tokens_input_uncached"], 100)
         self.assertEqual(usage["tokens_cache_read"], 999)
         self.assertEqual(usage["tokens_cache_write"], 10)
@@ -70,7 +70,7 @@ class TestParseJson(unittest.TestCase):
             '"cache_creation_input_tokens":2,"cache_read_input_tokens":99}}'
         )
         tokens, turns, tail, ok, usage = claude._parse_json_with_usage(payload)
-        self.assertEqual(tokens, 58)  # legacy scalar = input + output
+        self.assertEqual(tokens, 58)
         self.assertEqual(usage["tokens_cache_read"], 99)
         self.assertEqual(usage["tokens_cache_write"], 2)
         self.assertEqual(turns, 1)
@@ -98,7 +98,6 @@ class TestParseJson(unittest.TestCase):
 
 class TestModelGating(unittest.TestCase):
     def test_frontier_model_unsupported(self):
-        # This adapter must NEVER accept a subscription/frontier model.
         res = claude.run("do it", "/tmp", "gpt-5.5-medium", 5)
         self.assertFalse(res["completed"])
         self.assertIn("unsupported-model", res["error"])
@@ -123,8 +122,8 @@ class TestModelGating(unittest.TestCase):
 
 class TestDockerAuthMounts(unittest.TestCase):
     def test_claude_mounts_nothing(self):
-        # claude runs open models only; ~/.claude must never be mounted so a
-        # container run can't touch the user's Anthropic subscription.
+        # WHY: Mounting native credentials would let the container pick a private subscription
+        # route.
         self.assertIn("claude", docker_exec.AUTH_MOUNTS)
         self.assertEqual(docker_exec.AUTH_MOUNTS["claude"], [])
         self.assertEqual(docker_exec._auth_mount_args("claude"), [])

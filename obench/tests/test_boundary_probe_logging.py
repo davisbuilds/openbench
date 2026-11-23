@@ -11,14 +11,12 @@ import unittest
 
 class BoundaryProbeLoggingTests(unittest.TestCase):
     def test_socket_handlers_cannot_interleave_record_and_newline(self):
-        # Read the actual container program without importing optional Harbor.
         source = Path(__file__).resolve().parents[2] / 'scripts/local/verify_repair_sandbox.py'
         module = ast.parse(source.read_text())
         server = next(ast.literal_eval(node.value) for node in module.body
                       if isinstance(node, ast.Assign) and any(
                           isinstance(target, ast.Name) and target.id == 'SERVER'
                           for target in node.targets))
-        # Load its definitions without launching privileged-port listeners.
         tree = ast.parse(server)
         definitions = ast.Module(body=[node for node in tree.body if isinstance(
             node, (ast.Import, ast.ImportFrom, ast.Assign, ast.FunctionDef))], type_ignores=[])
@@ -26,7 +24,8 @@ class BoundaryProbeLoggingTests(unittest.TestCase):
         class YieldingOutput(io.StringIO):
             def write(self, data):
                 result = super().write(data)
-                # Force the scheduling window between print's separate writes.
+                # WHY: Force a scheduling gap between writes so the test can expose an
+                # interleaved record.
                 time.sleep(.001)
                 return result
 

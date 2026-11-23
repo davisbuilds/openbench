@@ -302,7 +302,6 @@ class TestMatchedDenominators(StatsTestCase):
         for task in ("t1", "t2"):
             self.make_task(task)
         rows = [
-            # Common cells for both models: (t1, h, trial1), (t2, h, trial1).
             {"harness": "h", "model": "a", "task": "t1", "trial": 1, "success": True,
              "failure_class": "solved"},
             {"harness": "h", "model": "b", "task": "t1", "trial": 1, "success": False,
@@ -311,7 +310,6 @@ class TestMatchedDenominators(StatsTestCase):
              "failure_class": "wrong_answer"},
             {"harness": "h", "model": "b", "task": "t2", "trial": 1, "success": True,
              "failure_class": "solved"},
-            # Unmatched extra cell only for model a; appears in all-countable only.
             {"harness": "h", "model": "a", "task": "t1", "trial": 2, "success": True,
              "failure_class": "solved"},
         ]
@@ -417,8 +415,6 @@ class TestProvenanceGate(StatsTestCase):
         self.assertGreaterEqual(text.count("NON-COMPARABLE"), 2)
 
     def test_harness_version_compared_per_harness_not_per_group(self):
-        # Different harnesses at different versions inside one model group is
-        # normal, NOT a provenance flag.
         self.make_task("t1")
         rows = []
         for model in ("a", "b"):

@@ -39,12 +39,11 @@ class TestModels(unittest.TestCase):
         self.assertEqual(self.devin.MODELS["gpt-5.6-sol"], "gpt-5-6-sol-medium")
         self.assertEqual(self.devin.MODELS["grok-4.5"], "grok-4-5-medium")
         self.assertEqual(self.devin.MODELS["glm-5.2"], "glm-5-2")
-        # Legacy lane: account default, no --model.
         self.assertIsNone(self.devin.MODELS["gpt-5.5-medium"])
 
     def test_excluded_models_rejected(self):
-        # deepseek is absent from devin's menu; kimi is k2.7 not k3 — both are
-        # excluded, so their canonicals must fail closed as unsupported.
+        # WHY: The upstream model names cover different versions. Unsupported canonicals must
+        # not silently use a nearby model.
         for model in ("deepseek-v4-flash", "kimi-k3"):
             res = self.devin.run("x", "/tmp", model, 5)
             self.assertFalse(res["completed"])
@@ -65,7 +64,6 @@ class TestModels(unittest.TestCase):
             self.assertTrue(res["completed"])
             self.assertIn("--model", cmd)
             self.assertEqual(cmd[cmd.index("--model") + 1], uid)
-            # Instruction stays behind the -- sentinel.
             self.assertEqual(cmd[-2:], ["--", "do it"])
 
     def test_legacy_gpt55_omits_model_flag(self):
@@ -91,7 +89,7 @@ class TestServingPathMarker(unittest.TestCase):
             tokens, turns, usage = devin._parse_export_with_usage(path)
         finally:
             os.unlink(path)
-        self.assertEqual(tokens, 50)  # 100 - 60 + 10 (fresh, cache excluded)
+        self.assertEqual(tokens, 50)
         self.assertEqual(turns, 1)
         self.assertEqual(usage["usage_raw"]["serving_path"], "devin-cloud")
         self.assertEqual(usage["token_basis"], "estimated")

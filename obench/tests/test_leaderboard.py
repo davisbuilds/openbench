@@ -333,10 +333,9 @@ class BuildLeaderboardTests(unittest.TestCase):
         doc = leaderboard.build_leaderboard(self.site)
         self.assertEqual(doc["bundle_count"], 2)
         ids = [b["id"] for b in doc["bundles"]]
-        self.assertEqual(ids, ["bundle-b", "bundle-a"])  # date desc, then id
+        self.assertEqual(ids, ["bundle-b", "bundle-a"])
 
         by_id = {b["id"]: b for b in doc["bundles"]}
-        # pi is perfect in A and zero in B — must not merge into one arm.
         pi_a = next(a for a in by_id["bundle-a"]["arms"] if a["harness"] == "pi")
         pi_b = next(a for a in by_id["bundle-b"]["arms"] if a["harness"] == "pi")
         self.assertAlmostEqual(pi_a["solve_rate"], 1.0)
@@ -361,7 +360,6 @@ class BuildLeaderboardTests(unittest.TestCase):
             self.assertIn(label, page)
         self.assertNotIn(">Tokens/solve<", page)
         self.assertNotIn("cache-hit", page.lower())
-        # Each bundle keeps its own board rather than merging into one table.
         self.assertEqual(page.count('data-harness="pi"'), 2)
 
     def test_dedupes_identical_results_sha(self):
@@ -374,8 +372,8 @@ class BuildLeaderboardTests(unittest.TestCase):
             os.path.join(self.site, "releases.json"),
             json.dumps([rel], indent=2) + "\n",
         )
-        # Community copy with same results bytes → same sha after publish... 
-        # Copy the release bundle tree into community.
+        # WHY: Release and community copies can use different paths for identical results.
+        # Deduplicate by content.
         import shutil
         community = os.path.join(self.site, "community", "seed-copy")
         shutil.copytree(
@@ -597,7 +595,6 @@ class BuildLeaderboardTests(unittest.TestCase):
             json.dumps([rel], indent=2) + "\n",
         )
         _write(os.path.join(self.site, "community.json"), "[]\n")
-        # Kept as a shim: it now builds the same artifacts as `obench site build`.
         info = leaderboard.write_leaderboard(self.site)
         self.assertEqual(info["html_path"], os.path.join(self.site, "index.html"))
         self.assertTrue(os.path.isfile(info["html_path"]))

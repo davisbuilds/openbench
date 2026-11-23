@@ -145,7 +145,6 @@ class TestEvaluate(unittest.TestCase):
         rows, ok = doctor.evaluate(
             doctor.ALL_HARNESSES, "gpt-5.5-medium", all_green_probes())
         self.assertTrue(ok)
-        # Pinned harnesses have four passing checks; unpinned Devin is INFO.
         self.assertEqual(len(rows), len(doctor.ALL_HARNESSES) * 4)
         self.assertTrue(all(r["ok"] is not False for r in rows))
 
@@ -161,7 +160,7 @@ class TestEvaluate(unittest.TestCase):
         p.env_map["CLIPROXYAPI_BASE_URL"] = "https://bridge.example/v1"
         p.http_map["https://bridge.example/v1/models"] = (200, '{"data":[{"id":"gpt-5.6"}]}')
         rows, ok = doctor.evaluate(["grokbuild"], "gpt-5.6", p)
-        self.assertTrue(ok)  # configured remote ingress needs no local binary
+        self.assertTrue(ok)
         p.env_map.pop("CLIPROXYAPI_BASE_URL")
 
         p.which_map["cliproxyapi"] = "/b/cliproxyapi"
@@ -210,7 +209,6 @@ class TestEvaluate(unittest.TestCase):
 
     def test_opencode_auth_needs_oauth_line(self):
         p = all_green_probes()
-        # Only the API-key env line present, no oauth credential.
         p.run_map[("opencode", "auth", "list")] = (0, "OpenAI OPENAI_API_KEY\n")
         rows, ok = doctor.evaluate(["opencode"], "gpt-5.5-medium", p)
         self.assertFalse(ok)
@@ -228,7 +226,7 @@ class TestEvaluate(unittest.TestCase):
 
     def test_adapter_import_failure_fails_model(self):
         p = all_green_probes()
-        p.models_map.pop("devin")  # import_adapter will raise
+        p.models_map.pop("devin")
         rows, ok = doctor.evaluate(["devin"], "gpt-5.5-medium", p)
         self.assertFalse(ok)
         model = next(r for r in rows if r["check"] == "MODEL")
@@ -317,7 +315,6 @@ class TestEvaluate(unittest.TestCase):
 
 class TestExitCode(unittest.TestCase):
     def test_main_returns_zero_when_all_ok(self):
-        # main() builds a real Probes(); patch the class to our fake.
         original = doctor.Probes
         doctor.Probes = lambda: all_green_probes()
         try:
@@ -417,7 +414,6 @@ class TestDockerInformational(unittest.TestCase):
 
     def test_docker_down_does_not_affect_exit(self):
         p = all_green_probes()
-        # docker present but daemon not responding -> INFO FAIL, exit still 0.
         p.run_map[("docker", "info", "--format", "{{.ServerVersion}}")] = (1, "")
         original = doctor.Probes
         doctor.Probes = lambda: p
@@ -491,7 +487,7 @@ class TestDockerEnv(unittest.TestCase):
 
     def test_check_docker_resources_below_memory(self):
         p = self._docker_env_probes()
-        p.run_map[("docker", "info", "--format", "{{.MemTotal}}")] = (0, "4294967296")  # 4 GiB
+        p.run_map[("docker", "info", "--format", "{{.MemTotal}}")] = (0, "4294967296")
         ok, detail = doctor.check_docker_resources(p, {"cpus": 4, "memory_gib": 12})
         self.assertFalse(ok)
         self.assertIn("Memory", detail)
@@ -566,7 +562,6 @@ class TestDockerEnv(unittest.TestCase):
     def test_check_auth_lanes_all_fresh(self):
         p = self._docker_env_probes()
         results = doctor.check_auth_lanes(p)
-        # With env keys set, all lanes should pass
         all_ok = all(ok for _, ok, _ in results)
         self.assertTrue(all_ok)
 
@@ -585,7 +580,6 @@ class TestDockerEnv(unittest.TestCase):
         task_images = {"test-img": [{"ref": "test-img@sha256:abc", "source": "test/1/t"}]}
         rows, ok, lane_results = doctor.evaluate_docker_env(p, task_images=task_images)
         self.assertTrue(ok)
-        # BUILDX, CPUS, IMAGES, AUTH = 4 rows
         self.assertEqual(len(rows), 4)
         for row in rows:
             self.assertIsNot(row["ok"], False, f"{row['check']} should not be FAIL")
@@ -593,7 +587,7 @@ class TestDockerEnv(unittest.TestCase):
     def test_evaluate_docker_env_buildx_fails(self):
         p = self._docker_env_probes()
         p.run_map[("docker", "buildx", "version")] = (1, "")
-        task_images = {}  # No images -> INFO
+        task_images = {}
         rows, ok, lane_results = doctor.evaluate_docker_env(p, task_images=task_images)
         self.assertFalse(ok)
         buildx = next(r for r in rows if r["check"] == "BUILDX")
@@ -647,7 +641,6 @@ class TestDockerEnv(unittest.TestCase):
         p.toml_map["/tmp/packs/org/my-pack/1.0.0/task-b/task.toml"] = {
             "docker_image": "img2@sha256:def",
         }
-        # pack.toml for pack_kind filtering
         p.isfile_map["/tmp/packs/org/my-pack/1.0.0/pack.toml"] = True
         p.toml_map["/tmp/packs/org/my-pack/1.0.0/pack.toml"] = {
             "kind": "tasks",

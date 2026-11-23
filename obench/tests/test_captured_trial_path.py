@@ -91,8 +91,6 @@ CAPTURE_CONTROL="declared"
                 self.assertTrue(bundle['tool_events'])
                 self.assertNotIn('later source drift',bundle['full_output'])
 
-                # Exercise the documented entry point, including --candidate
-                # dispatch and default evidence persistence, with fake CLIs only.
                 (capture/'skill').write_text('captured sentinel')
                 cli_env=dict(before)
                 cli_env['PYTHONPATH']=str(Path(run.__file__).resolve().parents[1])

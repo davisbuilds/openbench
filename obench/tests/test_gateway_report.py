@@ -464,8 +464,6 @@ class GatewayReportTests(unittest.TestCase):
 
         report = gateway_report.aggregate(rows, bootstrap_replicates=20)
 
-        # task_a contributes the paired block delta 5 - 3 = 2. task_b
-        # contributes 2 - 1 = 1, so tasks equally produce 1.5.
         contrast = report["paired_contrasts"]["gateway"]["metrics"]["ttfb_s"]
         self.assertEqual(contrast["estimate"], 1.5)
         self.assertEqual(contrast["paired_task_coverage"]["covered"], 2)

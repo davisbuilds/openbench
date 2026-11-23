@@ -22,6 +22,16 @@ the PR, not as a "resolved" note here).
 
 ## Open
 
+### Validate HTTPS pack installation with a local transport fixture
+
+- **What:** The pack installation test in `obench/tests/test_packs.py`
+  classifies a URL, extracts a local archive, and verifies directory layout
+  in separate calls.
+- **Why:** The test leaves the composed HTTPS download, digest verification,
+  extraction, and installation path unexercised.
+- **Next:** Exercise the normal install entry point with a controlled HTTPS
+  response and cover archive digest rejection without a network dependency.
+
 ### Stage JSON-form COPY and ADD in the Harbor importer
 
 - **What:** `obench/import_harbor.py` `parse_dockerfile` sends JSON-form

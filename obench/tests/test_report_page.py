@@ -28,7 +28,9 @@ class ReportPageTest(unittest.TestCase):
                "failure_class": "solved" if success else "wrong_answer",
                "wall_time_s": 10, "tokens_input_uncached": 100,
                "tokens_output": 20, "tokens_cache_read": 50,
-               "tokens": 999999,  # vendor aggregate must never drive dashboard totals
+               # WHY: Give the vendor aggregate a different value so the fixture detects a
+               # dashboard that chooses it over the splits.
+               "tokens": 999999,
                "token_basis": "vendor_split", "harness_version": "1", "timeout_s": 60}
         row.update(extra)
         return row
@@ -45,7 +47,6 @@ class ReportPageTest(unittest.TestCase):
         fast = model["arms"][0]
         self.assertEqual((fast["solved"], fast["n"]), (1, 2))
         self.assertEqual(fast["tokens_input_uncached"], 200)
-        # Split total: (100+20+50)*2 rows / 1 solve = 340.
         self.assertEqual(fast["total_tokens"], 340)
         self.assertEqual(fast["token_basis"], "self-reported")
         self.assertEqual(fast["finished_rate"], 1.0)
@@ -78,7 +79,6 @@ class ReportPageTest(unittest.TestCase):
                      tokens_output=10, tokens_cache_read=10),
         ])
         model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
-        # Split total: (120+30+50)+(80+10+10) = 300 / 1 solve.
         self.assertEqual(model["arms"][0]["total_tokens"], 300)
         page = report_page.render_page([model], "Method")
         self.assertIn("Total tokens/solve (incl. cache reads)", page)
@@ -109,7 +109,6 @@ class ReportPageTest(unittest.TestCase):
         model = report_page.assemble_tables([{"path": path}], tasks_dirs=[self.tmp.name])[0]
         chart_data = {row["arm"]: row for row in report_page._chart_data(model)}
         self.assertTrue(chart_data["cursor"]["cli_basis"])
-        # Split-derived total for two solved cells at 170 each → 170.
         self.assertEqual(chart_data["pi"]["total_tokens"], 170)
         page = report_page.render_page([model], "Method")
         self.assertEqual(page.count('role="img"'), 3)
@@ -337,7 +336,6 @@ class ReportPageTest(unittest.TestCase):
                          "proxy-measured", "Harness × model correctness",
                          "Methodology &amp; limitations"):
             self.assertIn(expected, page)
-        # Proxy split total includes cache reads and ignores the vendor aggregate.
         pi = next(a for a in models[0]["arms"] if a["arm"] == "pi")
         self.assertEqual(pi["total_tokens"], 9120)
         self.assertEqual(pi["token_basis"], "proxy-measured")

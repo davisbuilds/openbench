@@ -148,7 +148,7 @@ else:
         self.assertEqual(observed['env']['ANTHROPIC_BASE_URL'], 'https://api.deepseek.com/anthropic')
         self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN', observed['env'])
         self.assertEqual(result['final_message'], 'finished')
-        self.assertIsNone(result['tool_events'])  # JSON does not observe tool traffic.
+        self.assertIsNone(result['tool_events'])
 
     def test_replace_env_api_cannot_fall_back_to_ambient_key(self):
         explicit = {**self.explicit, 'OPENBENCH_CLAUDE_AUTH_MODE': 'api'}
@@ -267,8 +267,8 @@ else:
                 self.assertIsNotNone(evidence['evidence_error'])
 
     def test_timeout_retains_partial_tool_evidence(self):
-        # Allow cold interpreter startup before the fixture's five-second stall.
-        # A 200 ms cap can kill it before it emits any partial evidence.
+        # WHY: Allow enough interpreter startup time for the fixture to emit partial evidence
+        # before its deliberate stall.
         result = self.run_lane(explicit={**self.explicit, 'FIXTURE_MODE': 'timeout'}, timeout=2)
         self.assertFalse(result['completed'])
         self.assertIn('timeout', result['error'])

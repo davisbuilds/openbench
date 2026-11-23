@@ -44,7 +44,6 @@ class ReportersAgreeTests(unittest.TestCase):
                                        len(judged))
 
     def test_retried_cell_counts_once_in_both(self):
-        # The exact live case: two attempts, both a real verdict.
         rows = [_row("t", 2, "wrong_answer", ts="2026-01-01"),
                 _row("t", 2, "wrong_answer", ts="2026-01-02")]
         rep, rq = self._both(rows)

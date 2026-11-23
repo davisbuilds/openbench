@@ -51,8 +51,8 @@ class RowHostProvenanceTests(unittest.TestCase):
         catches the whole class, not just this one field.
         """
         from obench.run import ROW_FIELDS
-        # output_tail is deliberately NOT persisted: raw agent output goes to
-        # local-only transcripts (a scrubbing concern), never the results JSONL.
+        # WHY: Raw output belongs in local transcripts because publication may require
+        # scrubbing it.
         deliberately_unpersisted = {"output_tail"}
         missing = [k for k in self._row_literal()
                    if k not in ROW_FIELDS and k not in deliberately_unpersisted]

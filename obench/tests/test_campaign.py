@@ -82,8 +82,8 @@ class CampaignTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which('tmux'),'tmux not installed')
     def test_real_tmux_launch_with_spaces_and_duplicate_refusal(self):
-        # Stand-in work proves the supervisor launch/lock/environment seam;
-        # real Harbor execution is covered by the integration control.
+        # WHY: Use local work to qualify the supervisor and lock without dispatching an actual
+        # Harbor campaign.
         code = "from pathlib import Path; import os,sys,time; from obench.campaign import execution_lock; d=Path(sys.argv[1]);\nwith execution_lock(d,blocking=True):\n (d/'alive').write_text(str('OPENAI_API_KEY' in os.environ)); time.sleep(30)"
         command=[sys.executable,'-c',code,str(self.directory)]
         env={'PATH':os.environ['PATH'],'HOME':os.environ['HOME'],'PYTHONPATH':str(campaign.ROOT)}
@@ -130,7 +130,7 @@ class CampaignTests(unittest.TestCase):
         spawn.assert_not_called()
 
     def test_worker_rejects_drift_before_executor(self):
-        # Execute in a child because it intentionally redirects process stdout.
+        # WHY: Run in a child because the command redirects process-wide standard output.
         path=self.directory/'launch.json'
         value={**self.launch,'suite':str(self.root/'missing-suite.toml'),'harbor_binary':'not-run'}
         campaign.write_record(path,value)

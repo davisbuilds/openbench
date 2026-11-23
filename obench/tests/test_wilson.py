@@ -18,19 +18,16 @@ class TestWilsonCI(unittest.TestCase):
     def test_zero_of_five(self):
         lo, hi = wilson_ci(0, 5)
         self.assertEqual(lo, 0.0)
-        # Upper bound is positive but well below 1 for a clean run of failures.
         self.assertGreater(hi, 0.0)
         self.assertLess(hi, 0.6)
 
     def test_five_of_five(self):
         lo, hi = wilson_ci(5, 5)
-        # Lower bound leaves room for uncertainty; upper bound clamps to 1.
         self.assertGreater(lo, 0.4)
         self.assertLess(lo, 1.0)
         self.assertEqual(hi, 1.0)
 
     def test_n_zero_edge(self):
-        # No observations -> full uncertainty, no division by zero.
         self.assertEqual(wilson_ci(0, 0), (0.0, 1.0))
 
     def test_bounds_are_ordered_and_clamped(self):

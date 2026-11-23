@@ -157,8 +157,8 @@ class CampaignPackageTests(unittest.TestCase):
                 previous=path.stat().st_mode & 0o777
                 path.chmod(previous ^ 0o111)
                 try:
-                    # Recomputing a task seal is not authority to change its
-                    # package-approved execution environment.
+                    # WHY: A fresh content seal cannot authorize permissions outside the
+                    # package’s approved execution projection.
                     with self.assertRaisesRegex(ValueError, 'projection'):
                         package_campaign.task_manifest(self.task,self.auth)
                 finally:

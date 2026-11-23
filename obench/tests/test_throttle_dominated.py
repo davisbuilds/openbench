@@ -25,13 +25,9 @@ def _row(ok, throttled, **kw):
 
 class ThrottleDominatedTests(unittest.TestCase):
     def test_dominated_cell_is_rate_limited_not_wrong_answer(self):
-        # The wide25 shape: a few replies got through, most died on 429s,
-        # checker judged the scraps.
         self.assertEqual(fc.classify_failure(_row(ok=5, throttled=14)), "rate_limited")
 
     def test_minority_throttling_keeps_the_verdict(self):
-        # Recovered-with-work stays a real wrong answer (the original
-        # checker-owned-verdict case).
         self.assertEqual(fc.classify_failure(_row(ok=14, throttled=5)), "wrong_answer")
 
     def test_a_solve_is_never_reclassified(self):

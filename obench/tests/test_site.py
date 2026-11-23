@@ -104,10 +104,8 @@ class HarnessFamilyTests(_SiteFixture):
         self.assertEqual([a["harness"] for a in arms], ["fast", "slow"])
         self.assertEqual(arms[0]["solve_rate"], 1.0)
         self.assertEqual(arms[1]["solve_rate"], 0.5)
-        # Enrichment: median wall time comes from solved cells only.
         self.assertAlmostEqual(arms[0]["median_wall_s"], 5.0)
         self.assertAlmostEqual(arms[1]["median_wall_s"], 40.0)
-        # No configured price for model-x, so cost stays absent rather than 0.
         self.assertIsNone(arms[0]["cost_per_solve_usd"])
 
     def test_enrichment_matches_published_denominators(self):
@@ -1008,8 +1006,6 @@ class GatewayProbeFamilyTests(_SiteFixture):
             for row in site._gateway_probe_composite_scores(bundle)
         }
 
-        # Latency ratios: cold 2x/2x, warm 1x/1.5x. Throughput is 1x.
-        # Combined request success is 18/20.
         expected = (
             0.25 * 50.0
             + 0.20 * 50.0
@@ -1029,7 +1025,6 @@ class GatewayProbeFamilyTests(_SiteFixture):
             },
         )
 
-        # Slower direct-provider performance improves the gateway-relative score.
         direct = bundle["arms"][0]
         for condition in direct["conditions"].values():
             for name in (
@@ -1429,7 +1424,6 @@ class RenderTests(_SiteFixture):
                     ("javascript:", "data:", "vbscript:", "//")),
                 f"unsafe href rendered: {href!r}",
             )
-        # Dropping the link must not drop the text.
         self.assertIn("Evil bundle", page)
         self.assertIn("results.jsonl", page)
 
@@ -1493,7 +1487,6 @@ class RenderTests(_SiteFixture):
         self.assertIn("<tbody>", head)
         self.assertIn('data-harness="fast"', head)
         self.assertIn('data-harness="slow"', head)
-        # Two arms rendered as two real rows, before any JS runs.
         self.assertEqual(head.count("<tr data-harness="), 2)
         self.assertNotIn("<tbody>", script)
 
@@ -1589,8 +1582,8 @@ class DesignContractTests(_SiteFixture):
         self.assertNotIn('content:"$ "', self.page)
 
     def test_both_theme_scopes_are_defined(self):
-        # The media query carries the OS preference; the data-theme scopes carry
-        # the viewer's toggle and must be able to win in both directions.
+        # WHY: The explicit viewer preference must override the operating system preference in
+        # either direction.
         self.assertIn("@media (prefers-color-scheme:dark)", self.page)
         self.assertIn(':root[data-theme="dark"]', self.page)
         self.assertIn(':root[data-theme="light"]', self.page)
@@ -1623,7 +1616,8 @@ class DesignContractTests(_SiteFixture):
         self.assertIn("--pole-worse-ink:", self.page)
         self.assertIn(".dv .val.better{color:var(--pole-better-ink)}", self.page)
         self.assertIn(".dv .val.worse{color:var(--pole-worse-ink)}", self.page)
-        # The raw mark hue must never be assigned to a text colour.
+        # WHY: Plot colors do not meet the same contrast requirement as text. Use the separate
+        # text step.
         self.assertNotIn(".val.worse{color:var(--pole-worse)}", self.page)
 
     def test_plot_width_is_budgeted_per_table(self):
@@ -1640,7 +1634,6 @@ class DesignContractTests(_SiteFixture):
         self.assertTrue(any("matched result rows" in f for f in facts))
         self.assertIn("result-sealed bundle", deck)
         self.assertNotIn("verified bundle", deck)
-        # No interpretation of the numbers, and no claimed cause.
         for forbidden in ("because", "due to", "caused by", "proves",
                           "clusters", "spans", "wins", "best", "fastest"):
             self.assertNotIn(forbidden, (title + " " + deck).lower())
@@ -1781,7 +1774,6 @@ class ContrastPlotTests(unittest.TestCase):
         better = site._delta_cell(
             self._metric(0.08, 0.02, 0.14), site._fmt_pct, True, 0.2)
         self.assertIn("val better", better)
-        # Lower latency is better, so a positive delta is the "worse" pole.
         worse = site._delta_cell(
             self._metric(3.45, 1.10, 5.90), lambda v: f"{v:.2f}s", False, 6.0)
         self.assertIn("val worse", worse)

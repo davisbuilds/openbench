@@ -48,8 +48,6 @@ class FlatBenchLayoutTests(unittest.TestCase):
             for src in glob.glob(os.path.join(PKG, "adapters", "*.py")):
                 shutil.copy(src, os.path.join(bench, "adapters", os.path.basename(src)))
 
-            # Import each adapter in a clean interpreter whose sys.path mirrors
-            # entry.py's world: /bench and /bench/adapters, no obench package.
             probe = (
                 "import glob, importlib.util, os, sys\n"
                 f"bench = {bench!r}\n"
@@ -68,11 +66,8 @@ class FlatBenchLayoutTests(unittest.TestCase):
                 "print('\\n'.join(failures))\n"
                 "sys.exit(1 if failures else 0)\n"
             )
-            # -I (isolated) + cwd=bench: without this, the repo root rides in on
-            # sys.path, `from obench import ...` succeeds via the real package,
-            # and the flat-layout fallback is never exercised -- the negative
-            # control (reverting the gateway_spec fix) passed this test until
-            # isolation was added.
+            # WHY: The real package on sys.path can mask a broken flat-container import.
+            # Isolate the interpreter before checking adapter imports.
             proc = subprocess.run([sys.executable, "-I", "-c", probe],
                                   capture_output=True, text=True, timeout=120,
                                   cwd=bench)

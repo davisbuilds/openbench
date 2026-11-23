@@ -28,8 +28,6 @@ class DecideCellOutcomeTests(unittest.TestCase):
         self.assertIn("c1", arm.satisfied_cells)
 
     def test_wrong_answer_row_is_satisfied_a_real_verdict(self):
-        # wrong_answer is NOT excluded from solve-rate -> it is a graded verdict,
-        # so the cell is satisfied (done), never re-queued.
         arm = _arm()
         d = mq.decide_cell_outcome(
             rc=0, row={"failure_class": "wrong_answer"}, run_id="c1", arm_state=arm,
@@ -37,7 +35,6 @@ class DecideCellOutcomeTests(unittest.TestCase):
         self.assertEqual(d.action, "satisfied")
 
     def test_missing_row_is_config_error(self):
-        # runner exited without writing any row -> mis-wired arm, not a retry case
         arm = _arm()
         d = mq.decide_cell_outcome(
             rc=2, row=None, run_id="c1", arm_state=arm,
@@ -54,8 +51,6 @@ class DecideCellOutcomeTests(unittest.TestCase):
         self.assertEqual(arm.consecutive_excluded, 1)
 
     def test_rate_limited_over_wall_cap_exhausts_despite_budget(self):
-        # cumulative wall crossed the cap -> stop even though the retry budget
-        # would still allow a re-queue (the throttle-timeout burn guard).
         arm = _arm()
         d = mq.decide_cell_outcome(
             rc=0, row={"failure_class": "rate_limited"}, run_id="c1", arm_state=arm,
@@ -76,7 +71,7 @@ class DecideCellOutcomeTests(unittest.TestCase):
         d = mq.decide_cell_outcome(
             rc=0, row={"failure_class": "rate_limited"}, run_id="c1", arm_state=arm,
             prior_attempt=1, result_attempt_count=0, cell_wall=0.0, max_cell_wall_s=None)
-        self.assertEqual(d.new_retry_count, 2)  # max(prior_attempt+1, result_attempt_count)
+        self.assertEqual(d.new_retry_count, 2)
 
 
 if __name__ == "__main__":

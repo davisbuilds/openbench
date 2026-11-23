@@ -163,8 +163,8 @@ class ClassifierTests(unittest.TestCase):
                 self.assertFalse(bqi.matches('scripts/ci/unit_tests.py', files, directories))
 
     def test_unknown_step_condition_keeps_its_inputs(self):
-        # A recognized equality within a larger expression cannot exclude the
-        # step: the rest of the expression could select this lane too.
+        # WHY: An equality in one branch of a compound condition cannot rule out the rest of
+        # that condition.
         unknown = WORKFLOW.replace("if: matrix.lane == 'repair-grading'",
                                    "if: matrix.lane == 'repair-grading' || success()")
         self.repo.write({bqi.WORKFLOW: unknown})
@@ -242,8 +242,6 @@ class ClassifierTests(unittest.TestCase):
                 bqi.decide(str(self.repo.path), self.repo.base, head, **kwargs)
 
     def test_push_compares_exact_endpoints_instead_of_merge_base(self):
-        # A force-push rolls back b.py on the old branch; the new branch itself
-        # changes only prose relative to their common ancestor.
         self.repo.write({'obench/b.py': '# old branch input change\n'})
         before = self.repo.commit('old branch')
         after = self.repo.change(['docs/guide.md'])
@@ -253,8 +251,8 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(report['changed'], ['docs/guide.md', 'obench/b.py'])
 
     def test_push_unions_both_endpoint_closures(self):
-        # The new endpoint stops importing b.py. Changing b.py must still match
-        # the closure that was used at the old endpoint.
+        # WHY: An input may disappear from the new code’s imports while still affecting the
+        # previous endpoint.
         self.repo.write({'obench/a.py': 'import obench.inline\n',
                          'obench/b.py': '# changed while removing import\n'})
         head = self.repo.commit('remove dependency')
@@ -281,8 +279,6 @@ class ClassifierTests(unittest.TestCase):
         self.assertSkips(['obench/adapters/x.py'])
 
     def test_a_deleted_input_still_runs(self):
-        # Deleting b.py breaks a.py without changing it; the base closure
-        # still names b.py.
         self.assertRuns(delete=['obench/b.py'], matched=['obench/b.py'])
 
     def test_a_new_import_of_an_unrelated_module_runs(self):
@@ -293,8 +289,8 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(report['matched'], ['obench/b.py', 'obench/unrelated.py'])
 
     def test_a_dependency_added_on_the_advancing_base_runs(self):
-        # The PR changes only unrelated.py, but main has since started
-        # importing it; the merged code CI tests reaches the change.
+        # WHY: The runner tests the merged tree, which can add dependencies absent from the PR
+        # branch.
         head = self.repo.change(['obench/unrelated.py'])
         self.repo.git('checkout', '-q', 'main')
         self.repo.write({'obench/b.py': 'from . import unrelated\n'})

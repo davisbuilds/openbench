@@ -24,8 +24,8 @@ class AccessibleNameTests(unittest.TestCase):
         html = HTML
         for label in ('Activity details', 'Close details', 'Search activities', 'Status', 'Retry'):
             html = html.replace(label, label.upper())
-        # Unlike exact string labels, Playwright regex labels preserve surrounding
-        # whitespace from ordinary indented, nested HTML. Exercise that path.
+        # WHY: Regular-expression label matching preserves HTML indentation whitespace.
+        # Exercise that distinction through the real driver.
         html = html.replace('<label>SEARCH ACTIVITIES<input type="search" aria-label="SEARCH ACTIVITIES">',
                             '<label>\n  <span>SEARCH ACTIVITIES</span>\n  <input type="search">\n')
         selected = [c for c in cases() if c[0] in ('detail', 'keyboard', 'retry', 'combined-filter')]

@@ -772,8 +772,8 @@ model = "gpt-5.6-terra"
                    "stats": {"n_completed_trials": 1, "n_pending_trials": 0, "n_running_trials": 0}}
         (job / "result.json").write_text(json.dumps(summary))
         before = {p.name: p.read_bytes() for p in job.iterdir()}
-        # If Harbor is dispatched this returns a failing code. Completed jobs
-        # must instead be re-imported/validated without rewriting their hashes.
+        # WHY: Use a failing Harbor result as a control so redispatch during completed resume
+        # cannot pass.
         second = self._run_simulated(compiled, returncodes=[99])
         self.assertEqual(second.results_sha256, first.results_sha256)
         self.assertEqual({p.name: p.read_bytes() for p in job.iterdir()}, before)

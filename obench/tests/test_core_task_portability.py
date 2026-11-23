@@ -20,9 +20,8 @@ from obench.paths import SOURCE_ROOT
 
 _CORE_TASKS_DIR = os.path.join(SOURCE_ROOT, "benchmarks", "core")
 
-# Substrings that mark a checker as non-portable / fork-local. Absolute home
-# paths bind a checker to one machine; the agentmonitor deps var is a fork-local
-# dependency that has no place in the shared core tier.
+# WHY: Core tasks must run without any machine-specific paths or dependencies from a fork-
+# owned benchmark.
 _FORBIDDEN = (
     "/Users/",
     "/home/",
@@ -39,8 +38,6 @@ class CoreTaskPortabilityTests(unittest.TestCase):
         offenders = []
         pattern = os.path.join(_CORE_TASKS_DIR, "*", "checker.sh")
         checkers = sorted(glob.glob(pattern))
-        # Sanity: the guard is pointed at a populated tier, not an empty glob
-        # (an absence that silently passes is worse than a failure).
         self.assertTrue(checkers, f"no core checkers found under {_CORE_TASKS_DIR}")
         for checker in checkers:
             with open(checker, encoding="utf-8") as fh:

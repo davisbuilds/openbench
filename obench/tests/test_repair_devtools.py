@@ -135,8 +135,6 @@ class DeveloperCaseTests(unittest.TestCase):
         metadata = tomllib.loads((current / 'task.toml').read_text())['metadata']
         self.assertEqual(metadata['openbench_revision'], {**old_metadata['openbench_revision'], 'case_revision': 3})
         self.assertEqual(task_digest(current), metadata['openbench_task_content_digest']['sha256'])
-        # The selected developer control and every retained revision remain bound
-        # into admission; changing the fixture cannot reuse an old receipt.
         import runpy
         selected = runpy.run_path(str(root / 'scripts/local/verify_repair_developer.py'))['TASKS']
         self.assertIn(current.name, selected)

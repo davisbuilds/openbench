@@ -121,12 +121,10 @@ class RunnerReliabilityGateTests(unittest.TestCase):
         smoke = result_row("wrong_answer", 25)
         main = result_row("wrong_answer", 500)
         custom_tasks_dir = os.path.join(self.tmp.name, "custom-tasks")
-        # Runnable smoke target in the resolved tasks dir (no make-it-run).
         smoke_task = os.path.join(custom_tasks_dir, "alpha-smoke")
         os.makedirs(os.path.join(smoke_task, "workspace"))
         open(os.path.join(smoke_task, "instruction.md"), "w", encoding="utf-8").close()
         open(os.path.join(smoke_task, "checker.sh"), "w", encoding="utf-8").close()
-        # Main task path only needs to exist for argparse; run_cell is mocked.
         os.makedirs(os.path.join(custom_tasks_dir, "main-task"), exist_ok=True)
 
         code, run_cell, emitted, stdout, stderr = self.invoke(

@@ -37,7 +37,8 @@ class TrialEvidenceTests(unittest.TestCase):
             kind="config", provenance=None, REQUIRE_EVIDENCE=required,
             captured_context=captured,
         )
-        # A live model is neither necessary nor authorized for this I/O contract.
+        # WHY: Use a local adapter result so this persistence test does not dispatch a live
+        # model.
         with mock.patch.object(run, "invoke_adapter", side_effect=adapter_error, return_value=(
                 self.result if result is None else result, "local")):
             return run.run_cell(
@@ -84,7 +85,8 @@ class TrialEvidenceTests(unittest.TestCase):
             with self.subTest(missing=missing):
                 result = dict(self.result)
                 del result[missing]
-                # Give each case its own storage to avoid legitimate collision detection.
+                # WHY: Give each variant its own storage so collision handling cannot prevent
+                # the intended evidence exercise.
                 with tempfile.TemporaryDirectory(dir=self.tmp.name) as directory:
                     old = self.root
                     self.root = Path(directory)
@@ -176,7 +178,6 @@ class TrialEvidenceTests(unittest.TestCase):
         self.assertEqual(saved["transcript_status"], "failed")
         self.assertEqual(saved["transcript_error_code"], "persistence_error")
 
-        # Positive control: removing only the obstructing symlink restores the copy.
         legacy.unlink()
         repaired = self.cell(required=True)
         self.assertEqual(repaired["evidence_status"], "complete")

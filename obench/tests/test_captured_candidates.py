@@ -64,7 +64,7 @@ class CapturedCandidateTests(unittest.TestCase):
 
     def test_capture_rejects_live_configuration_root(self):
         with self.assertRaisesRegex(ValueError, 'CODEX_HOME.*config_dir'):
-            self.candidate()  # valid control
+            self.candidate()
             self.candidate_with_live_root()
 
     def candidate_with_live_root(self):

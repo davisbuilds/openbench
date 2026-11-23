@@ -147,7 +147,6 @@ class CLIContractsTests(unittest.TestCase):
 
 class ReceiptInputTests(unittest.TestCase):
     def test_loaded_validation_cannot_be_relabelled_with_changed_disk_bytes(self):
-        # Read real files from a temporary copy; only relocate the source root.
         import shutil
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -214,9 +213,8 @@ class ReceiptVerdictTests(unittest.TestCase):
             'runtime_image': self.image, 'task': self.info['task'], 'task_binding': {},
             'project_check': 'true', 'probe_sha256': rv.sha(rv.ROOT/'scripts/local/verify_repair_codex.py'),
             'workflow_sha256': workflow_identity(), 'evidence_sha256': evidence}))
-        # Isolate only task discovery and external Docker grading. Specification,
-        # source/evidence files, hashing, control assessment and receipt parsing
-        # use the production paths. Real Docker controls cover both task families.
+        # WHY: Substitute task discovery and Docker only so the test still binds real files,
+        # hashes, and receipts.
         self.inspect = patch.object(rv, 'inspect_task', return_value=self.info)
         self.inspect.start(); self.addCleanup(self.inspect.stop)
         self.grader = patch.object(rv, 'replay', side_effect=lambda task, source, image:

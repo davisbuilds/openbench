@@ -61,7 +61,7 @@ class TestBumpClisCheck(unittest.TestCase):
         self.assertIn("0.144.1", out)
         self.assertIn("0.144.2", out)
         self.assertIn("update", out)
-        self.assertIn("(installer)", out)  # cursor is installer-pinned, not npm-viewed
+        self.assertIn("(installer)", out)
 
     def test_check_json_emits_parseable_rows(self):
         latest = {pin.package: "9.9.9" for pin in bump_clis.PINS if pin.package}

@@ -52,7 +52,6 @@ effort   = "medium"
         self.assertEqual(got["m"]["base_url"], "")
 
     def test_skips_malformed_entry(self):
-        # missing required key (env_key) -> skipped, not crashed
         path = self._write("""
 [models."bad"]
 provider = "openrouter"
@@ -71,7 +70,7 @@ effort   = "medium"
         old = os.environ.get("OPENBENCH_OPEN_MODELS")
         os.environ["OPENBENCH_OPEN_MODELS"] = path
         try:
-            got = omc.load_open_model_overrides()  # no explicit path -> uses env
+            got = omc.load_open_model_overrides()
         finally:
             if old is None:
                 del os.environ["OPENBENCH_OPEN_MODELS"]

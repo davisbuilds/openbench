@@ -49,7 +49,6 @@ def load_bridge_hooks():
 class TestBridgeUrl(unittest.TestCase):
     def setUp(self):
         self.codex = load_codex()
-        # Snapshot and clear the env vars we mutate so tests are independent.
         self._saved = {k: os.environ.get(k)
                        for k in ("BENCH_IN_CONTAINER", "BENCH_BRIDGE_PORT")}
         for k in self._saved:
@@ -94,7 +93,8 @@ class TestBridgeUrl(unittest.TestCase):
                 os.environ.pop(k, None)
 
     def test_base_url_ends_in_v1_for_responses_suffix(self):
-        # codex appends /responses to base_url; /v1 tail yields /v1/responses.
+        # WHY: The client appends /responses, so the configured base URL must carry the
+        # version prefix.
         self.assertTrue(self.codex._bridge_base_url().endswith("/v1"))
 
 
@@ -119,12 +119,11 @@ class TestBridgeGating(unittest.TestCase):
                 os.environ["DEEPSEEK_API_KEY"] = saved
 
     def test_bridge_down_is_setup_needed(self):
-        # Force key present + an unused port so the reachability probe fails.
         os.environ.setdefault("DEEPSEEK_API_KEY", "test-key")
         saved_key = os.environ.get("DEEPSEEK_API_KEY")
         saved_port = os.environ.get("BENCH_BRIDGE_PORT")
         os.environ["DEEPSEEK_API_KEY"] = saved_key or "test-key"
-        os.environ["BENCH_BRIDGE_PORT"] = "1"  # nothing listens on TCP/1
+        os.environ["BENCH_BRIDGE_PORT"] = "1"
         try:
             res = self.codex.run("hi", "/tmp", "deepseek-v4-flash", 5)
             self.assertFalse(res["completed"])
@@ -210,8 +209,6 @@ class TestToolSanitize(unittest.TestCase):
         data = {"model": "glm-5.2", "tools": list(self.tools)}
         self.h.sanitize_tools(data)
         names = [t["name"] for t in data["tools"]]
-        # exec_command kept; freeform (custom w/ params) coerced; namespace,
-        # web_search, image_generation dropped.
         self.assertEqual(names, ["exec_command", "freeform"])
         self.assertTrue(all(t["type"] == "function" for t in data["tools"]))
 
@@ -234,7 +231,7 @@ class TestToolSanitize(unittest.TestCase):
 
     def test_no_tools_key_is_safe(self):
         data = {"model": "glm-5.2"}
-        self.h.sanitize_tools(data)  # must not raise
+        self.h.sanitize_tools(data)
         self.assertNotIn("tools", data)
 
 

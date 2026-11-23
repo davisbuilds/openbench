@@ -47,13 +47,12 @@ class ImagePreflightTests(unittest.TestCase):
             mq.missing_task_images(spec, root, docker_runner=lambda ref: False), [])
 
     def test_the_exact_digest_matters_not_just_the_repo(self):
-        # The failing host DID have the repository, at a different digest.
         spec, root = self._spec("openbench-tb2-demo@sha256:aaa")
         seen = {}
 
         def runner(ref):
             seen["ref"] = ref
-            return "@sha256:bbb" in ref          # host holds a DIFFERENT digest
+            return "@sha256:bbb" in ref
 
         self.assertTrue(mq.missing_task_images(spec, root, docker_runner=runner))
         self.assertIn("@sha256:aaa", seen["ref"])

@@ -48,7 +48,6 @@ class SpecChangeResumeTests(unittest.TestCase):
         self.assertEqual([p[2]["run_id"] for p in pending], ["a", "b"])
 
     def test_the_old_logic_would_have_raised(self):
-        # Negative control: the exact expression that crashed.
         all_cells = [_cell("keep")]
         with self.assertRaises(StopIteration):
             next(c for c in all_cells if c["run_id"] == "gone")

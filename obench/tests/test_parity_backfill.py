@@ -28,7 +28,6 @@ class ParityBackfillTests(unittest.TestCase):
             self.assertEqual(lanes[harness]["basis"], {"vendor_split": 1})
             self.assertGreater(lanes[harness]["tokens_fresh_sum"], 0)
 
-        # The fixtures are cut from actual transcripts and remain multi-turn / multi-step.
         self.assertGreaterEqual(
             self._count_json_events("pi_terminal-bench_cancel-async-tasks_deepseek-v4-flash_trial1.txt", "turn_end"),
             2,
@@ -75,9 +74,7 @@ class ParityBackfillTests(unittest.TestCase):
             self.assertIn("tokens_cache_read", pi)
 
     def test_missing_transcript_adopts_scalar_only_for_exact_basis_lanes(self):
-        # pi's legacy scalar IS the target basis (probe-verified), so a pi row
-        # with no transcript adopts it as tokens_fresh. claude's scalar uses a
-        # different basis (includes cache writes) and must stay unavailable.
+        # WHY: Only adopt a legacy scalar when it matches the measure’s cache-write policy.
         with tempfile.TemporaryDirectory() as td:
             result_path = Path(td) / "results.jsonl"
             mk = lambda h: json.dumps({
@@ -102,9 +99,6 @@ class ParityBackfillTests(unittest.TestCase):
             self.assertIsNone(claude_row["tokens_fresh"])
 
     def test_scalar_adoption_is_idempotent_across_passes(self):
-        # A grokbuild row with only a legacy scalar must keep tokens_fresh
-        # through repeated backfill passes (regression: pass 2 wiped the
-        # adopted value while leaving token_basis=scalar_exact).
         with tempfile.TemporaryDirectory() as td:
             result_path = Path(td) / "results.jsonl"
             result_path.write_text(json.dumps({

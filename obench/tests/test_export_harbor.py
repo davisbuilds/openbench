@@ -407,7 +407,6 @@ class ExportTaskTests(unittest.TestCase):
             docker = fh.read()
         self.assertIn("FROM python:3.11-slim", docker)
         self.assertIn("COPY app/ /app/", docker)
-        # No results/transcripts/auth leakage paths.
         for banned in ("results", "transcripts", "auth"):
             self.assertFalse(os.path.exists(os.path.join(out, banned)))
 
@@ -492,12 +491,8 @@ class CoreTasksHarborRoundTripTests(unittest.TestCase):
         shutil.rmtree(cls.out_root, ignore_errors=True)
 
     def test_exports_all_eight_core_tasks(self):
-        # The fork adds graded tasks (json-canonicalize, glob-match) into tasks/
-        # alongside the upstream binary core (fork-local machine-specific tasks
-        # live in benchmarks/local/, not here), so asserting exact set equality here
-        # breaks every time a task is added.
-        # The durable guarantee is that all 8 core tasks export cleanly -- a
-        # subset check -- not that they are the ONLY tasks present.
+        # WHY: New core tasks can be admitted independently. Check that the established tasks
+        # still export without freezing the whole task set.
         missing = sorted(set(CORE_TASKS) - set(self.by_name))
         self.assertEqual(missing, [], f"core tasks failed to export: {missing}")
 
@@ -516,7 +511,6 @@ class CoreTasksHarborRoundTripTests(unittest.TestCase):
                 failures.append(f"{name}: untouched={r0!r} oracle={r1!r}")
         self.assertEqual(failures, [], "\n".join(failures))
 
-        # Binary (non-partial) core tasks stay at reward 0.0 when untouched.
         for name in ("build-a-cli", "fix-failing-test", "make-it-run", "misleading-error"):
             r0, _r1 = eh.round_trip_polarity(self.by_name[name]["out_dir"])
             self.assertEqual(r0, 0.0, name)
