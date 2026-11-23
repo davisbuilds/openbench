@@ -39,7 +39,8 @@ def load_jsonl(paths):
                         raise ValueError('row is not an object')
                 except ValueError as exc:
                     raise ValueError(f'{path}:{number}: invalid result: {exc}') from exc
-                # Evidence locations are reader-owned, never trusted from row data.
+                # WHY: Input rows are untrusted. Use the reader’s path and offset for error
+                # provenance.
                 row['_src'] = f'{path}:{number}'
                 rows.append(row)
     return rows

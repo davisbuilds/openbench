@@ -50,8 +50,8 @@ if [ ! -x "$VENV/bin/litellm" ]; then
   exit 1
 fi
 
-# Inspect files from the shell before loading keys or starting this venv's
-# Python: LiteLLM 1.107.0 executes its payload at interpreter startup.
+# WHY: Inspect package files in the shell so Python startup cannot run an unverified
+# installation first.
 refuse_installation() {
   echo "ERROR: unsafe or unverified LiteLLM bridge installation; refusing to start." >&2
   echo "Do not run this venv's Python or pip. Investigate startup hooks and rebuild the venv from vetted artifacts." >&2
@@ -81,8 +81,6 @@ if [ ! -f "$CONFIG" ]; then
   exit 1
 fi
 
-# Load provider keys if not already exported. `set -a` exports everything the
-# file defines; values are never echoed.
 if [ -f "$KEYS" ]; then
   set -a
   # shellcheck disable=SC1090
@@ -99,7 +97,7 @@ if [ "${#missing[@]}" -gt 0 ]; then
 fi
 
 echo "Starting open-model bridge on ${BIND}:${PORT} (Ctrl-C to stop)" >&2
-# Put bench/bridge/ on PYTHONPATH so the config's callback module (hooks.py) is
-# importable regardless of the proxy's working directory.
+# WHY: Resolve the callback module through its package directory, independent of the caller’s
+# working directory.
 export PYTHONPATH="$BRIDGE_DIR${PYTHONPATH:+:$PYTHONPATH}"
 exec "$VENV/bin/litellm" --config "$CONFIG" --host "$BIND" --port "$PORT"

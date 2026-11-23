@@ -48,7 +48,8 @@ if ! command -v grok >/dev/null 2>&1; then
   exit 2
 fi
 
-# Defense in depth: the adapter also removes this variable from the child.
+# WHY: Clear ambient key state so the subscription smoke path stays isolated if adapter
+# filtering changes.
 unset OPENAI_API_KEY
 
 python3 - "$bridge_url" <<'PY'

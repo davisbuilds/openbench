@@ -222,9 +222,8 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
             with tempfile.TemporaryDirectory(prefix="candidate_gate_home_") as fake_home:
                 with open(os.path.join(fake_home, ".openbench-canary"), "w", encoding="utf-8") as fh:
                     fh.write(sentinel)
-                # Resolve and mirror declared auth sources before HOME becomes
-                # the canary root; ManifestHarness will then stage the same
-                # credentials into its separate child HOME.
+                # WHY: Resolve auth sources before the canary changes HOME, so the child HOME
+                # receives the declared credentials.
                 for auth in getattr(candidate, "auth_files", []):
                     source = candidates._auth_source(auth["source"])
                     mirrored = candidates._safe_destination(fake_home, auth["source"][2:])
@@ -261,8 +260,8 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
              if candidate.unmetered else
              f"counting proxy usage-bearing calls={calls}")))
 
-        # Replace only the executable for this probe, retaining the candidate's
-        # own run/timeout implementation while avoiding model-dependent behavior.
+        # WHY: Keep the adapter timeout path intact while removing model variability from the
+        # probe.
         timeout_row = (timeout_runner or
                        (lambda seconds: _candidate_timeout_probe(candidate, model, seconds)))(5)
         timeout_ok = timeout_row.get("failure_class") == "timeout"
@@ -275,9 +274,8 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
         saved = {name: os.environ.get(name) for name in key_names}
         saved_candidate_env = dict(getattr(candidate, "env", {}))
         saved_auth = list(getattr(candidate, "auth_files", []))
-        # This refusal governs arbitrary manifest commands. Config variants
-        # retain their native adapter auth checks; captured variants separately
-        # require inherit_env=false during manifest validation.
+        # WHY: An arbitrary manifest command needs an isolated environment. Native routes and
+        # captured adapters have separate auth checks.
         unsafe_inheritance = (candidate.kind == "manifest"
                               and bool(getattr(candidate, "inherit_env", False)))
         try:
@@ -285,7 +283,8 @@ def gate(spec_path, model, *, live=False, calibrate=False, timeout=2400,
                 os.environ[name] = INVALID_KEY
                 if name in candidate.env:
                     candidate.env[name] = INVALID_KEY
-            # Do not stage a real auth file for the deliberate bad-credential cell.
+            # WHY: A bad-credential probe could succeed if the fixture inherited a valid auth
+            # file.
             candidate.auth_files = []
             with tempfile.TemporaryDirectory(prefix="candidate_gate_bad_auth_home_") as bad_home:
                 old_home = os.environ.get("HOME")
@@ -369,7 +368,7 @@ def main(argv=None):
     parser.add_argument("--timeout", type=int, default=2400)
     args = parser.parse_args(argv)
     if args.calibrate and not args.live:
-        pass  # preview remains useful and spends nothing
+        pass
     server = ledger = proxy_ctx = None
     try:
         if args.live:

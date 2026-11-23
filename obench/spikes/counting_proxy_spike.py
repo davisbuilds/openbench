@@ -65,8 +65,8 @@ def extract_usage(obj: Any) -> Any:
         usage = obj.get("usage")
         if _looks_like_usage(usage):
             return usage
-        # Some CLIs wrap the provider object under response/message/etc. Recurse
-        # through the event and prefer the last nested usage-looking object.
+        # WHY: Providers can nest usage under several envelope shapes. Run-level totals may
+        # appear after the first nested object.
         found = None
         for value in obj.values():
             candidate = extract_usage(value)
@@ -102,7 +102,6 @@ def decode_for_parsing(body: bytes, content_encoding: str) -> bytes:
 def parse_sse_usage(body: bytes) -> Any:
     """Find the last SSE JSON event that carries a usage object."""
     text = body.decode("utf-8", "replace")
-    # Normalize line endings, split on blank-line event boundaries.
     events = text.replace("\r\n", "\n").replace("\r", "\n").split("\n\n")
     found = None
     for event in events:
@@ -137,7 +136,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "SpikeProxy/0.1"
 
-    def log_message(self, fmt: str, *args: Any) -> None:  # no default stderr request logs
+    def log_message(self, fmt: str, *args: Any) -> None:
         if getattr(self.server, "verbose", False):
             sys.stderr.write("proxy: " + (fmt % args) + "\n")
 
@@ -185,8 +184,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_response(resp.status, resp.reason)
             for key, value in forwarded_headers:
                 self.send_header(key, value)
-            # We strip upstream Transfer-Encoding; force EOF framing for any
-            # response without Content-Length (common for SSE/chunked streams).
+            # WHY: Upstream chunked framing is removed while relaying the byte stream. EOF
+            # must delimit responses without Content-Length.
             self.send_header("Connection", "close")
             self.close_connection = True
             self.end_headers()
@@ -248,7 +247,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def _upstream_path(self, upstream: Any) -> str:
         base_path = upstream.path.rstrip("/")
-        # self.path already includes query string.
         return f"{base_path}{self.path if self.path.startswith('/') else '/' + self.path}"
 
     def _forward_headers(self) -> dict[str, str]:
@@ -288,7 +286,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 raise RuntimeError("invalid chunked body: bad chunk size") from exc
             if size == 0:
-                # Consume trailers until the blank line.
                 while True:
                     trailer = self.rfile.readline(8192)
                     if trailer in {b"\r\n", b"\n", b""}:

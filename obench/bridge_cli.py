@@ -46,9 +46,8 @@ from .paths import PACKAGE_DIR
 _BRIDGE_SCRIPT = os.path.join(PACKAGE_DIR, "openmodel_bridge.sh")
 _CONFIG_PATH = os.path.join(PACKAGE_DIR, "bridge", "config.yaml")
 _DEFAULT_PORT = 4141
-# Matches adapters/codex.py's host-lane default (_bridge_host() with
-# BENCH_IN_CONTAINER unset). The container-lane host.docker.internal
-# indirection is the adapter's concern, not this process manager's.
+# WHY: The process manager uses the adapter’s host-lane default. Containers resolve the
+# published host through their own routing.
 _DEFAULT_HOST = "localhost"
 
 
@@ -68,10 +67,6 @@ def _bridge_host() -> str:
     return _DEFAULT_HOST
 
 
-# --------------------------------------------------------------------------
-# Pure / unit-testable helpers -- no process launching, no long waits by
-# default. `up`/`down`/`status` below are thin orchestration over these.
-# --------------------------------------------------------------------------
 
 def config_hash(config_path: str) -> str:
     """sha256 hex digest of the bridge config file's raw bytes."""
@@ -115,7 +110,7 @@ def pid_alive(pid: int | None) -> bool:
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True  # exists, just owned by someone/something else
+        return True  # WHY: A permission failure proves the process exists even when this user cannot signal it.
     return True
 
 
@@ -167,9 +162,6 @@ def running_state(state_path: str, host: str, port: int) -> dict | None:
     return state
 
 
-# --------------------------------------------------------------------------
-# Orchestration
-# --------------------------------------------------------------------------
 
 def cmd_up(args) -> int:
     host, port = _bridge_host(), _bridge_port()
@@ -189,8 +181,6 @@ def cmd_up(args) -> int:
               file=sys.stderr)
         return 1
 
-    # Not running (or the state file is stale/orphaned) -- clear bookkeeping
-    # and launch a fresh instance in the background.
     remove_state(state_path)
     home = _openbench_home()
     os.makedirs(home, exist_ok=True)
@@ -265,8 +255,6 @@ def cmd_status(args) -> int:
     if not up:
         print(f"bridge: DOWN ({host}:{port})")
         if state is not None:
-            # Nothing is listening despite a tracked state file -- it crashed
-            # or was killed outside our tools. Clear the orphaned bookkeeping.
             remove_state(state_path)
         return 1
 

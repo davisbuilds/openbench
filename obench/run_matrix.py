@@ -150,10 +150,8 @@ def _termination_handler(signum, _frame):
 
 def run_cell_subprocess(cmd):
     global _ACTIVE_PROC
-    # Keep obench/run.py out of the terminal's SIGINT process group so Ctrl-C
-    # reaches this wrapper, records a stop request, and lets the current cell
-    # append its row. SIGHUP/SIGTERM handlers above still clean up this detached
-    # process group so a dying wrapper does not orphan a costly agent run.
+    # WHY: Keep the active cell outside terminal SIGINT so the wrapper can stop after its
+    # result is written.
     proc = subprocess.Popen(cmd, start_new_session=True)
     _ACTIVE_PROC = proc
     try:

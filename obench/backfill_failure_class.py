@@ -74,10 +74,8 @@ def backfill(in_path, out_path, reclassify=False):
             if reclassify or fc not in FAILURE_CLASSES:
                 old_fc = fc
                 fc = classify_failure(row, row.get("output_tail") or "", _timeout_s_for_row(row))
-                # Historical backfill is tail-only. Preserve an existing
-                # rate_limited class when recomputation finds no saved marker;
-                # otherwise --reclassify would erase write-time full-output
-                # provider detections that were intentionally not persisted.
+                # WHY: Historical rows retain only output tails. Preserve the original rate-
+                # limit verdict when truncated evidence cannot confirm it.
                 if reclassify and old_fc == "rate_limited" and fc == "wrong_answer":
                     fc = old_fc
             row["failure_class"] = fc

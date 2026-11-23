@@ -99,7 +99,7 @@ def parse_cli(harness: str, stream: Path) -> dict[str, Any]:
             out["tokens_input_uncached"] += int(u.get("input") or 0)
             out["tokens_cache_read"] += int(u.get("cacheRead") or 0)
             out["tokens_cache_write"] += int(u.get("cacheWrite") or 0)
-            out["tokens_output"] += int(u.get("output") or 0)  # DeepSeek completion_tokens, reasoning-inclusive
+            out["tokens_output"] += int(u.get("output") or 0)
             out["tokens_reasoning"] += int(u.get("reasoning") or 0)
         out["token_basis"] = "vendor_split"
         return out
@@ -125,7 +125,7 @@ def parse_cli(harness: str, stream: Path) -> dict[str, Any]:
             out["tokens_input_uncached"] += int(t.get("input") or 0)
             out["tokens_cache_read"] += int(cache.get("read") or 0)
             out["tokens_cache_write"] += int(cache.get("write") or 0)
-            out["tokens_output"] += visible + reasoning  # normalize to DeepSeek completion_tokens
+            out["tokens_output"] += visible + reasoning
             out["tokens_reasoning"] += reasoning
             visible_output += visible
         out["opencode_visible_output_tokens"] = visible_output
@@ -181,7 +181,8 @@ def parse_cli(harness: str, stream: Path) -> dict[str, Any]:
             out["tokens_cache_write"] = int(usage.get("cache_creation_input_tokens") or 0)
             out["tokens_output"] = int(usage.get("output_tokens") or 0)
         details = usage.get("completion_tokens_details") or {}
-        # Claude Code JSON currently does not expose DeepSeek reasoning token counts.
+        # WHY: A missing vendor breakdown leaves reasoning unknown. Treating it as zero would
+        # make the parity comparison misleading.
         out["tokens_reasoning"] = int(details["reasoning_tokens"]) if isinstance(details, dict) and details.get("reasoning_tokens") is not None else None
         out["token_basis"] = "vendor_split"
         return out
